@@ -282,7 +282,7 @@ const ProfileDropdown: React.FC<ProfileDropdownProps> = ({
         </div>
 
         <div className="currency-dropdown-wrapper">
-          <div className="profile-menu-item" onClick={handleCurrencyToggle}>
+          <div className="profile-menu-item with-arrow" onClick={handleCurrencyToggle}>
             <div className="profile-menu-icon">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <line x1="12" y1="1" x2="12" y2="23"></line>
