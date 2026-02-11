@@ -26,8 +26,6 @@ const DEFAULT_USER_DATA: UserData = {
   subscriptionActive: false
 };
 
-const PROFILE_URL = 'https://lk.bot.eutochkin.com/user/profile';
-
 const ProfileDropdown: React.FC<ProfileDropdownProps> = ({ 
   isOpen,
   onClose,
@@ -90,7 +88,9 @@ const ProfileDropdown: React.FC<ProfileDropdownProps> = ({
 
   const handleProfileCardClick = () => {
     onClose();
-    window.location.href = PROFILE_URL;
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('app:navigate', { detail: 'profile' }));
+    }
   };
 
   const handleProfileCardKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {

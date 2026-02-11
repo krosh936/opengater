@@ -13,6 +13,7 @@ import DevicesPage from '../Pages/DevicesPage/DevicesPage';
 import InvitePage from '../Pages/InvitePage/InvitePage';
 import HelpPage from '../Pages/HelpPage/HelpPage';
 import InstallPage from '../Pages/InstallPage/InstallPage';
+import ProfilePage from '../Pages/ProfilePage/ProfilePage';
 // Р”СЂСѓРіРёРµ СЃС‚СЂР°РЅРёС†С‹ РёРјРїРѕСЂС‚РёСЂСѓР№С‚Рµ РїРѕ РјРµСЂРµ СЃРѕР·РґР°РЅРёСЏ
 
 // РўРёРїС‹ РґР»СЏ РЅР°РІРёРіР°С†РёРѕРЅРЅС‹С… СЌР»РµРјРµРЅС‚РѕРІ
@@ -31,9 +32,9 @@ export type SidebarSectionType = {
 };
 
 // РўРёРїС‹ РґР»СЏ СЃС‚СЂР°РЅРёС†
-type PageType = 'home' | 'subscription' | 'invite' | 'raffle' | 'locations' | 'devices' | 'help' | 'install';
+type PageType = 'home' | 'subscription' | 'invite' | 'raffle' | 'locations' | 'devices' | 'help' | 'install' | 'profile';
 const ACTIVE_PAGE_STORAGE_KEY = 'opengater_active_page';
-const pageTypes: PageType[] = ['home', 'subscription', 'invite', 'raffle', 'locations', 'devices', 'help', 'install'];
+const pageTypes: PageType[] = ['home', 'subscription', 'invite', 'raffle', 'locations', 'devices', 'help', 'install', 'profile'];
 
 const isPageType = (value: string): value is PageType => pageTypes.includes(value as PageType);
 
@@ -54,6 +55,20 @@ const Sidebar: React.FC = () => {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(ACTIVE_PAGE_STORAGE_KEY, activeItem);
   }, [activeItem]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleNavigate = (event: Event) => {
+      const detail = (event as CustomEvent<string>).detail;
+      if (detail && isPageType(detail)) {
+        setActiveItem(detail);
+      }
+    };
+    window.addEventListener('app:navigate', handleNavigate as EventListener);
+    return () => {
+      window.removeEventListener('app:navigate', handleNavigate as EventListener);
+    };
+  }, []);
   
   // Р¤СѓРЅРєС†РёСЏ СЂРµРЅРґРµСЂР° Р°РєС‚РёРІРЅРѕР№ СЃС‚СЂР°РЅРёС†С‹
   const renderActivePage = () => {
@@ -74,6 +89,8 @@ const Sidebar: React.FC = () => {
         return <HelpPage />;
       case 'install':
         return <InstallPage onBack={() => handleNavClick('home')} />;
+      case 'profile':
+        return <ProfilePage onBack={() => handleNavClick('home')} />;
       default:
         return <HomePage />; // РџРѕ СѓРјРѕР»С‡Р°РЅРёСЋ РїРѕРєР°Р·С‹РІР°РµРј HomePage
     }
