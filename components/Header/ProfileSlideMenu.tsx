@@ -25,6 +25,8 @@ const DEFAULT_USER_DATA: UserData = {
   subscriptionActive: false
 };
 
+const PROFILE_URL = 'https://lk.bot.eutochkin.com/user/profile';
+
 const ProfileSlideMenu: React.FC<ProfileSlideMenuProps> = ({
   isOpen,
   onClose,
@@ -58,12 +60,29 @@ const ProfileSlideMenu: React.FC<ProfileSlideMenuProps> = ({
   const subscriptionText = userData.subscriptionActive
     ? t('profile.subscription_active')
     : t('profile.subscription_inactive');
-  const displayEmail = userData.email || 'РќРµ СѓРєР°Р·Р°РЅ';
+  const displayName = userData.name || userData.email || '---';
+  const usernameRaw = userData.email || '';
+  const displayUsername =
+    usernameRaw && usernameRaw !== displayName
+      ? (usernameRaw.includes('@') ? usernameRaw : `@${usernameRaw}`)
+      : '';
   const displayUid = userData.uid || '-----';
   const currentCurrency = currency.code;
 
   const handleClose = () => {
     onClose();
+  };
+
+  const handleProfileCardClick = () => {
+    onClose();
+    window.location.href = PROFILE_URL;
+  };
+
+  const handleProfileCardKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      handleProfileCardClick();
+    }
   };
 
   const copyUid = async () => {
@@ -131,32 +150,51 @@ const ProfileSlideMenu: React.FC<ProfileSlideMenuProps> = ({
             <line x1="6" y1="6" x2="18" y2="18"></line>
           </svg>
         </button>
-        <div className="profile-info">
-          <div className="profile-info-avatar" id="menuAvatar">{initials}</div>
-          <div className="profile-info-details">
-            <div className="profile-email" id="menuEmail">
-              {displayEmail}
+        <div
+          className="profile-card"
+          role="button"
+          tabIndex={0}
+          onClick={handleProfileCardClick}
+          onKeyDown={handleProfileCardKeyDown}
+        >
+          <div className="profile-card-avatar" id="menuAvatar">{initials}</div>
+          <div className="profile-card-info">
+            <div className="profile-card-fullname" id="menuFullName">
+              {displayName}
             </div>
-            <div className="profile-uid">
-              ID: <span id="menuUid">{displayUid}</span>
-              <button
-                className="copy-uid-btn"
-                onClick={copyUid}
-                disabled={!userData.uid}
-                title="РЎРєРѕРїРёСЂРѕРІР°С‚СЊ ID"
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                </svg>
-              </button>
-            </div>
-            <div className="subscription-badge" id="menuSubscriptionBadge">
+            {displayUsername && (
+              <div className="profile-card-username" id="menuUserName">
+                {displayUsername}
+              </div>
+            )}
+            <div
+              className={`subscription-badge ${userData.subscriptionActive ? '' : 'expired'}`}
+              id="menuSubscriptionBadge"
+            >
               <svg viewBox="0 0 24 24" fill="currentColor">
                 <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
               </svg>
               <span id="menuSubscriptionText">{subscriptionText}</span>
             </div>
+          </div>
+          <svg className="profile-card-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
+        </div>
+        <div className="profile-meta">
+          <div className="profile-uid">
+            ID: <span id="menuUid">{displayUid}</span>
+            <button
+              className="copy-uid-btn"
+              onClick={copyUid}
+              disabled={!userData.uid}
+              title="РЎРєРѕРїРёСЂРѕРІР°С‚СЊ ID"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </button>
           </div>
         </div>
       </div>

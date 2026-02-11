@@ -16,48 +16,29 @@ export default function HomePage({ onNavigate }: HomePageProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const autoplayRef = useRef<NodeJS.Timeout>();
   const [locations, setLocations] = useState<LocationItem[]>([]);
-  const [isMobile, setIsMobile] = useState(false);
-  const { currency, formatNumber } = useCurrency();
+  const { currency, formatNumber, formatCurrency } = useCurrency();
 
   // Используем хук для получения данных пользователя
   const { user, isLoading, error, isAuthenticated } = useUser();
   const { language, t } = useLanguage();
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const mediaQuery = window.matchMedia('(max-width: 767px)');
-    const handleChange = () => setIsMobile(mediaQuery.matches);
-    handleChange();
-    if (mediaQuery.addEventListener) {
-      mediaQuery.addEventListener('change', handleChange);
-    } else {
-      mediaQuery.addListener(handleChange);
-    }
-    return () => {
-      if (mediaQuery.removeEventListener) {
-        mediaQuery.removeEventListener('change', handleChange);
-      } else {
-        mediaQuery.removeListener(handleChange);
-      }
-    };
-  }, []);
+  const touchStateRef = useRef({ startX: 0, currentX: 0, isDragging: false });
 
   // Данные для промо-слайдера
   const promoSlides = [
     {
       id: 1,
-      type: 'raffle',
-      title: t('promo.raffle_title'),
-      subtitle: t('promo.raffle_subtitle'),
-      background: 'linear-gradient(135deg, #1a5a2e 0%, #0d3d1a 50%, #061f0d 100%)',
-      onClick: () => handleRaffleClick(),
+      type: 'locations',
+      title: t('promo.locations_title'),
+      subtitle: t('promo.locations_subtitle'),
+      background: 'linear-gradient(135deg, #1a3a5a 0%, #0d2a4a 50%, #061a3a 100%)',
+      onClick: () => handleLocations(),
       icon: (
         <svg viewBox="0 0 24 24" fill="none" style={{ width: '100%', height: '100%' }}>
-          <path d="M20 12V22H4V12" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"></path>
-          <path d="M22 7H2V12H22V7Z" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="rgba(255,255,255,0.15)"></path>
-          <path d="M12 22V7" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"></path>
-          <path d="M12 7H7.5C6.12 7 5 5.88 5 4.5C5 3.12 6.12 2 7.5 2C10 2 12 7 12 7Z" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"></path>
-          <path d="M12 7H16.5C17.88 7 19 5.88 19 4.5C19 3.12 17.88 2 16.5 2C14 2 12 7 12 7Z" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"></path>
+          <circle cx="12" cy="12" r="10" stroke="white" strokeWidth="1.5" fill="rgba(255,255,255,0.1)"></circle>
+          <path d="M2 12h20" stroke="white" strokeWidth="1.5" strokeLinecap="round"></path>
+          <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" stroke="white" strokeWidth="1.5"></path>
+          <path d="M2 12c0-2 3-4 10-4s10 2 10 4" stroke="white" strokeWidth="1" opacity="0.5"></path>
         </svg>
       )
     },
@@ -65,7 +46,7 @@ export default function HomePage({ onNavigate }: HomePageProps) {
       id: 2,
       type: 'invite',
       title: t('promo.invite_title'),
-      subtitle: t('promo.invite_subtitle'),
+      subtitle: t('promo.invite_subtitle', { amount: formatCurrency(50) }),
       background: 'linear-gradient(135deg, #1a4a4a 0%, #2d5a5a 50%, #3a6868 100%)',
       onClick: () => handleReferral(),
       icon: (
@@ -94,25 +75,26 @@ export default function HomePage({ onNavigate }: HomePageProps) {
     }
   ];
 
-  const visibleSlides = isMobile
-    ? promoSlides.filter((slide) => slide.type !== 'raffle')
-    : promoSlides;
+  const startAutoplay = () => {
+    if (autoplayRef.current) {
+      clearInterval(autoplayRef.current);
+    }
+    if (promoSlides.length < 2) {
+      return;
+    }
+    autoplayRef.current = setInterval(() => {
+      setCurrentSlide((prev) => (prev + 1) % promoSlides.length);
+    }, 7000);
+  };
 
   useEffect(() => {
-    if (currentSlide >= visibleSlides.length) {
+    if (currentSlide >= promoSlides.length) {
       setCurrentSlide(0);
     }
-  }, [currentSlide, visibleSlides.length]);
+  }, [currentSlide, promoSlides.length]);
 
   // Автопрокрутка слайдера
   useEffect(() => {
-    if (visibleSlides.length < 2) return;
-    const startAutoplay = () => {
-      autoplayRef.current = setInterval(() => {
-        setCurrentSlide((prev) => (prev + 1) % visibleSlides.length);
-      }, 5000);
-    };
-
     startAutoplay();
 
     return () => {
@@ -120,7 +102,7 @@ export default function HomePage({ onNavigate }: HomePageProps) {
         clearInterval(autoplayRef.current);
       }
     };
-  }, [visibleSlides.length]);
+  }, [promoSlides.length]);
 
   // Обновление позиции слайдера (плавность задается в CSS)
   useEffect(() => {
@@ -130,10 +112,6 @@ export default function HomePage({ onNavigate }: HomePageProps) {
   }, [currentSlide]);
 
   // Обработчики кликов
-  const handleRaffleClick = () => {
-    console.log('Клик по розыгрышу');
-  };
-
   const handleReferral = () => {
     if (onNavigate) {
       onNavigate('invite');
@@ -249,10 +227,11 @@ export default function HomePage({ onNavigate }: HomePageProps) {
 
   // Ручное переключение слайдов
   const goToSlide = (index: number) => {
-    setCurrentSlide(index);
-    if (autoplayRef.current) {
-      clearInterval(autoplayRef.current);
-    }
+    const total = promoSlides.length;
+    if (!total) return;
+    const normalized = ((index % total) + total) % total;
+    setCurrentSlide(normalized);
+    startAutoplay();
   };
 
   // Пауза автопрокрутки при наведении
@@ -263,15 +242,46 @@ export default function HomePage({ onNavigate }: HomePageProps) {
   };
 
   const handleMouseLeave = () => {
+    startAutoplay();
+  };
+
+  const handleTouchStart = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (!sliderRef.current) return;
+    const touch = event.touches[0];
+    touchStateRef.current.startX = touch.clientX;
+    touchStateRef.current.currentX = touch.clientX;
+    touchStateRef.current.isDragging = true;
+    sliderRef.current.classList.add('dragging');
     if (autoplayRef.current) {
       clearInterval(autoplayRef.current);
     }
-    if (visibleSlides.length < 2) {
-      return;
+  };
+
+  const handleTouchMove = (event: React.TouchEvent<HTMLDivElement>) => {
+    if (!touchStateRef.current.isDragging || !sliderRef.current || !trackRef.current) return;
+    const touch = event.touches[0];
+    touchStateRef.current.currentX = touch.clientX;
+    const diff = touchStateRef.current.currentX - touchStateRef.current.startX;
+    const percent = (diff / sliderRef.current.offsetWidth) * 100;
+    trackRef.current.style.transform = `translateX(calc(-${currentSlide * 100}% + ${percent}%))`;
+  };
+
+  const handleTouchEnd = () => {
+    if (!touchStateRef.current.isDragging || !sliderRef.current) return;
+    touchStateRef.current.isDragging = false;
+    sliderRef.current.classList.remove('dragging');
+
+    const diff = touchStateRef.current.currentX - touchStateRef.current.startX;
+    const threshold = 50;
+    if (Math.abs(diff) > threshold) {
+      if (diff < 0) {
+        goToSlide(currentSlide + 1);
+      } else {
+        goToSlide(currentSlide - 1);
+      }
+    } else {
+      goToSlide(currentSlide);
     }
-    autoplayRef.current = setInterval(() => {
-      setCurrentSlide((prev) => (prev + 1) % visibleSlides.length);
-    }, 5000);
   };
 
   // Если данные загружаются
@@ -381,6 +391,9 @@ export default function HomePage({ onNavigate }: HomePageProps) {
         ref={sliderRef}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
       >
         <div 
           className="promo-slider-track" 
@@ -391,7 +404,7 @@ export default function HomePage({ onNavigate }: HomePageProps) {
             transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
           }}
         >
-          {visibleSlides.map((slide) => (
+          {promoSlides.map((slide) => (
             <div
               key={slide.id}
               className="promo-slide"
@@ -408,7 +421,7 @@ export default function HomePage({ onNavigate }: HomePageProps) {
           ))}
         </div>
         <div className="promo-slider-dots" id="promo-slider-dots">
-          {visibleSlides.map((_, index) => (
+          {promoSlides.map((_, index) => (
             <div 
               key={index}
               className={`promo-slider-dot ${currentSlide === index ? 'active' : ''}`}

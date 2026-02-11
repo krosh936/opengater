@@ -315,6 +315,9 @@ body:not(.theme-transition) .profile-slide-menu {
 .profile-menu-header {
   padding: 24px 0 0;
   margin-bottom: 17px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .profile-menu-close {
@@ -335,6 +338,83 @@ body:not(.theme-transition) .profile-slide-menu {
 
 .profile-menu-close:hover {
   background: var(--surface-hover);
+}
+
+.profile-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(42, 42, 45, 0.48);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+[data-theme="light"] .profile-card {
+  background: #F5F5F7;
+  border-color: transparent;
+}
+
+.profile-card:hover {
+  background: var(--surface-hover);
+}
+
+.profile-card-avatar {
+  width: 40px;
+  height: 40px;
+  background: linear-gradient(135deg, #5BA3F5, #3D7EDB);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.profile-card-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.profile-card-fullname {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.profile-card-username {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.profile-card-arrow {
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.profile-card .subscription-badge {
+  margin-top: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+}
+
+.profile-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .profile-info {
@@ -769,6 +849,17 @@ body:not(.theme-transition) .profile-slide-menu {
 .profile-dropdown .profile-menu-header {
   padding: 16px;
   margin-bottom: 0;
+  gap: 10px;
+}
+
+.profile-dropdown .profile-card {
+  padding: 10px 12px;
+}
+
+.profile-dropdown .profile-card-avatar {
+  width: 36px;
+  height: 36px;
+  font-size: 13px;
 }
 
 .profile-dropdown .profile-menu-item {
