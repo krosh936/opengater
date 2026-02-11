@@ -43,6 +43,7 @@ const normalizeLanguageCode = (value?: string | null): Language | null => {
   return null;
 };
 
+// API payloads differ between endpoints; normalize them to our local options.
 const normalizeLanguageList = (input: unknown): LanguageOption[] => {
   if (!Array.isArray(input)) return DEFAULT_LANGUAGES;
   const byCode = new Map<Language, LanguageOption>();
@@ -772,6 +773,7 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
     let mounted = true;
     const loadLanguages = async () => {
       try {
+        // Prefer API-provided list, but fall back to defaults on any error.
         const apiLanguages = await fetchLanguages();
         if (!mounted) return;
         setLanguages(normalizeLanguageList(apiLanguages));
@@ -803,6 +805,7 @@ export const LanguageProvider = ({ children }: { children: ReactNode }) => {
   const t = useMemo(() => {
     const dict = translations[language];
     return (key: string, params?: Record<string, string | number>) => {
+      // Fallback to RU if key is missing and interpolate placeholders.
       const template = dict[key] || translations.ru[key] || key;
       if (!params) return template;
       return Object.entries(params).reduce((acc, [k, v]) => {

@@ -5,6 +5,7 @@ export const dynamic = 'force-dynamic';
 
 const UPSTREAM_BASE_URL = 'https://opngtr.com/api';
 
+// Hop-by-hop headers must not be forwarded by proxies.
 const hopByHopHeaders = new Set([
   'connection',
   'keep-alive',
@@ -43,6 +44,7 @@ const proxyRequest = async (req: NextRequest, pathParts: string[]) => {
       }
     });
 
+    // Upstream expects browser-like Origin/Referer for some endpoints.
     headers.set('origin', 'https://opngtr.com');
     headers.set('referer', 'https://opngtr.com/');
     headers.set('user-agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
@@ -55,6 +57,7 @@ const proxyRequest = async (req: NextRequest, pathParts: string[]) => {
       cache: 'no-store',
     };
 
+    // Forward body for non-GET/HEAD requests.
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       init.body = await req.text();
     }

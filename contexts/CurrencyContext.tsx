@@ -28,6 +28,7 @@ const findCurrency = (list: Currency[], code?: string | null) =>
   list.find((item) => item.code === code);
 
 const mergeCurrencies = (data: Currency[]) => {
+  // Merge API response onto defaults so UI still works if API omits some currencies.
   const map = new Map(DEFAULT_CURRENCIES.map((item) => [item.code, item]));
   data.forEach((item) => {
     const existing = map.get(item.code);
@@ -69,6 +70,7 @@ export const CurrencyProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    // Read persisted selection on first client render to avoid SSR mismatch.
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
       setSelectedCode(saved);
@@ -138,6 +140,7 @@ export const CurrencyProvider = ({ children }: { children: ReactNode }) => {
     }
     setSelectedCode(code);
     if (!user?.id) {
+      // No user yet: keep local state and force full reload so pages re-read currency.
       setCurrencyRefreshId((prev) => prev + 1);
       if (typeof window !== 'undefined') {
         window.location.reload();
@@ -145,6 +148,7 @@ export const CurrencyProvider = ({ children }: { children: ReactNode }) => {
       return;
     }
     try {
+      // Persist selection on backend so all endpoints return values in the new currency.
       await setUserCurrency(user.id, code);
     } catch {
       // keep local selection even if API update fails

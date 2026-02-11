@@ -31,6 +31,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       }
       
       const token = getUserToken();
+      // No token means the user is signed out; avoid calling the API.
       if (!token) {
         if (!silent) {
           setIsAuthenticated(false);
@@ -43,6 +44,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       setUser(userData);
       setIsAuthenticated(true);
       setError(null);
+      // Sync UI language with backend preference when available.
       if (userData?.language) {
         const raw = userData.language.toLowerCase();
         const nextLang = raw.includes('ru') || raw.includes('рус')
@@ -77,6 +79,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const refreshUser = async (options?: { silent?: boolean }) => {
+    // Silent refresh skips spinners to avoid UI flicker.
     await loadUser(options);
   };
 
