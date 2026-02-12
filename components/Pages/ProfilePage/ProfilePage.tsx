@@ -5,6 +5,7 @@ import { useUser } from '@/contexts/UserContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { fetchAuthProfile, linkTelegramToAuth, TelegramAuthPayload } from '@/lib/api';
+import { AUTH_POPUP_ORIGIN } from '@/lib/appConfig';
 
 interface ProfilePageProps {
   onBack?: () => void;
@@ -37,7 +38,7 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
   const [linkedTelegram, setLinkedTelegram] = useState<string | null>(null);
   const [telegramLinked, setTelegramLinked] = useState(false);
   const popupRef = useRef<Window | null>(null);
-  const popupOrigin = 'https://lka.bot.eutochkin.com';
+  const popupOrigin = AUTH_POPUP_ORIGIN;
 
   const getAuthToken = () => {
     if (typeof window === 'undefined') return null;

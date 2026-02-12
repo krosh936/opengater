@@ -1,23 +1,10 @@
 import { NextRequest } from 'next/server';
+import { API_UPSTREAMS } from '@/lib/appConfig';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// Варианты источников API. Оставьте один ACTIVE_UPSTREAMS.
-const UPSTREAMS_EUTOCHKIN = [
-  'https://api.bot.eutochkin.com/api',
-  'https://cdn.opngtr.ru/api',
-  'https://opngtr.com/api',
-];
-
-const UPSTREAMS_CDN = [
-  'https://cdn.opngtr.ru/api',
-  'https://api.bot.eutochkin.com/api',
-  'https://opngtr.com/api',
-];
-
-const ACTIVE_UPSTREAMS = UPSTREAMS_EUTOCHKIN;
-// const ACTIVE_UPSTREAMS = UPSTREAMS_CDN;
+const ACTIVE_UPSTREAMS = API_UPSTREAMS;
 
 // Hop-by-hop заголовки нельзя форвардить через прокси.
 const hopByHopHeaders = new Set([

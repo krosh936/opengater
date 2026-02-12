@@ -12,6 +12,7 @@ import {
   verifyAuthToken,
   verifyEmailAuthCode,
 } from '@/lib/api';
+import { AUTH_POPUP_ORIGIN, TELEGRAM_BOT_USERNAME } from '@/lib/appConfig';
 import { useLanguage } from '@/contexts/LanguageContext';
 
 export default function LoginPage() {
@@ -140,7 +141,7 @@ export default function LoginPage() {
     setError('');
 
     const lang = authLanguage || 'ru';
-    const url = new URL('https://lka.bot.eutochkin.com/');
+    const url = new URL(AUTH_POPUP_ORIGIN);
     url.searchParams.set('lang', lang);
     url.searchParams.set('theme', 'light');
 
@@ -152,6 +153,10 @@ export default function LoginPage() {
 
     if (!popup) {
       setError(t('profile.popup_blocked'));
+      const bot = TELEGRAM_BOT_USERNAME.replace(/^@/, '');
+      if (bot) {
+        window.open(`https://t.me/${bot}`, '_blank', 'noopener,noreferrer');
+      }
       return;
     }
 
@@ -175,7 +180,7 @@ export default function LoginPage() {
     };
 
     const onMessage = (event: MessageEvent) => {
-      if (event.origin !== 'https://lka.bot.eutochkin.com') return;
+      if (event.origin !== AUTH_POPUP_ORIGIN) return;
       if (!event.data || typeof event.data !== 'object') return;
       const data = event.data as Partial<AuthTokens & { type?: string }>;
       if (data.type === 'auth_success' && data.access_token) {
@@ -214,6 +219,7 @@ export default function LoginPage() {
         // Пока окно на другом домене — доступа нет.
       }
     }, 500);
+
   };
 
   const handleTokenLogin = () => {
