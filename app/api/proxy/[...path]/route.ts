@@ -4,7 +4,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const UPSTREAM_BASE_URLS = [
-  // Основной API (по просьбе): используем старый CDN.
+  // Основной API: используем CDN.
   'https://cdn.opngtr.ru/api',
   // 'https://api.bot.eutochkin.com/api', // Временно отключено: тестовый API падает 5xx.
   'https://opngtr.com/api',
