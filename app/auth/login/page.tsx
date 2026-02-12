@@ -19,6 +19,8 @@ export default function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const telegramWidgetRef = useRef<HTMLDivElement>(null);
   const [telegramBot, setTelegramBot] = useState('kostik_chukcha_bot');
+  const [telegramWidgetReady, setTelegramWidgetReady] = useState(false);
+  const [telegramBotTried, setTelegramBotTried] = useState<string[]>([]);
 
   const titleText = 'Добро пожаловать';
   const subtitleText = 'Вы можете использовать электронную почту\nили Telegram для входа или регистрации';
@@ -93,6 +95,7 @@ export default function LoginPage() {
     if (!useTelegramWidget) return;
     if (!telegramWidgetRef.current) return;
     telegramWidgetRef.current.innerHTML = '';
+    setTelegramWidgetReady(false);
     const script = document.createElement('script');
     script.src = 'https://telegram.org/js/telegram-widget.js?22';
     script.async = true;
@@ -102,21 +105,45 @@ export default function LoginPage() {
     script.setAttribute('data-onauth', 'onTelegramAuth(user)');
     script.setAttribute('data-request-access', 'write');
     telegramWidgetRef.current.appendChild(script);
+
+    const observer = new MutationObserver(() => {
+      if (!telegramWidgetRef.current) return;
+      const hasIframe = telegramWidgetRef.current.querySelector('iframe');
+      if (hasIframe) {
+        setTelegramWidgetReady(true);
+      }
+    });
+    observer.observe(telegramWidgetRef.current, { childList: true, subtree: true });
+
     const fallbackTimer = window.setTimeout(() => {
       if (!telegramWidgetRef.current) return;
       const hasIframe = telegramWidgetRef.current.querySelector('iframe');
-      if (!hasIframe) {
-        setUseTelegramWidget(false);
+      if (hasIframe) {
+        setTelegramWidgetReady(true);
+        return;
       }
+
+      const tried = new Set(telegramBotTried);
+      tried.add(telegramBot);
+      const fallbackBot = telegramBot === 'kostik_chukcha_bot' ? 'opengater_vpn_bot' : 'kostik_chukcha_bot';
+      if (!tried.has(fallbackBot)) {
+        setTelegramBotTried(Array.from(tried));
+        setTelegramBot(fallbackBot);
+        return;
+      }
+
+      setUseTelegramWidget(false);
     }, 1500);
     return () => {
+      observer.disconnect();
       window.clearTimeout(fallbackTimer);
     };
-  }, [useTelegramWidget, telegramBot]);
+  }, [useTelegramWidget, telegramBot, telegramBotTried]);
 
   const handleTelegramFallback = () => {
     if (typeof window !== 'undefined') {
-      window.open('https://t.me/opengater_vpn_bot', '_blank', 'noopener,noreferrer');
+      const bot = telegramBot.replace(/^@/, '');
+      window.open(`https://t.me/${bot}`, '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -207,7 +234,7 @@ export default function LoginPage() {
           <button
             type="button"
             className="page-module___8aEwW__btn page-module___8aEwW__btnOutline page-module___8aEwW__telegramBtn"
-            onClick={useTelegramWidget ? undefined : handleTelegramFallback}
+            onClick={!telegramWidgetReady ? handleTelegramFallback : undefined}
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
               <path d="M20.665 3.717l-17.73 6.837c-1.21.486-1.203 1.161-.222 1.462l4.552 1.42 10.532-6.645c.498-.303.953-.14.579.192l-8.533 7.701h-.002l.002.001-.314 4.692c.46 0 .663-.211.921-.46l2.211-2.15 4.599 3.397c.848.467 1.457.227 1.668-.787l3.019-14.228c.309-1.239-.473-1.8-1.282-1.432z"></path>
