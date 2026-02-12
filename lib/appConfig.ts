@@ -11,6 +11,8 @@ const PROFILE_EUTOCHKIN = {
   ],
   // Telegram-бот для логина/привязки при этом профиле.
   telegramBot: 'kostik_chukcha_bot',
+  // Прямая ссылка Telegram OAuth (если нужна).
+  telegramOAuthUrl: '',
 };
 
 // Профиль для CDN API (старый).
@@ -23,6 +25,8 @@ const PROFILE_CDN = {
   ],
   // Telegram-бот для логина/привязки при этом профиле.
   telegramBot: 'opengater_vpn_bot',
+  // Прямая ссылка Telegram OAuth (если нужна).
+  telegramOAuthUrl: 'https://oauth.telegram.org/auth?bot_id=7185292961&origin=https%3A%2F%2Fcdn.opngtr.ru&embed=1&request_access=write&return_to=https%3A%2F%2Fcdn.opngtr.ru%2Fauth%2Flogin',
 };
 
 // Активный профиль API. Переключайте одну строку.
@@ -35,5 +39,7 @@ export const API_UPSTREAMS = ACTIVE_PROFILE.upstreams;
 export const ACTIVE_PROFILE_NAME: ApiProfile = ACTIVE_PROFILE.name;
 // Telegram-бот для кнопки логина/привязки.
 export const TELEGRAM_BOT_USERNAME = ACTIVE_PROFILE.telegramBot;
+// Прямая ссылка Telegram OAuth (используется как fallback).
+export const TELEGRAM_OAUTH_URL = ACTIVE_PROFILE.telegramOAuthUrl;
 // Домен окна авторизации (popup) для email/telegram.
 export const AUTH_POPUP_ORIGIN = 'https://lka.bot.eutochkin.com';

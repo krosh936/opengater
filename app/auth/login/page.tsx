@@ -12,7 +12,7 @@ import {
   verifyAuthToken,
   verifyEmailAuthCode,
 } from '@/lib/api';
-import { AUTH_POPUP_ORIGIN, TELEGRAM_BOT_USERNAME } from '@/lib/appConfig';
+import { AUTH_POPUP_ORIGIN, TELEGRAM_BOT_USERNAME, TELEGRAM_OAUTH_URL } from '@/lib/appConfig';
 import { useLanguage } from '@/contexts/LanguageContext';
 
 export default function LoginPage() {
@@ -153,9 +153,13 @@ export default function LoginPage() {
 
     if (!popup) {
       setError(t('profile.popup_blocked'));
-      const bot = TELEGRAM_BOT_USERNAME.replace(/^@/, '');
-      if (bot) {
-        window.open(`https://t.me/${bot}`, '_blank', 'noopener,noreferrer');
+      if (TELEGRAM_OAUTH_URL) {
+        window.open(TELEGRAM_OAUTH_URL, '_blank', 'noopener,noreferrer');
+      } else {
+        const bot = TELEGRAM_BOT_USERNAME.replace(/^@/, '');
+        if (bot) {
+          window.open(`https://t.me/${bot}`, '_blank', 'noopener,noreferrer');
+        }
       }
       return;
     }

@@ -19,6 +19,7 @@ export const ACTIVE_PROFILE = PROFILE_EUTOCHKIN;
 **Что означает каждая настройка**
 - `API_UPSTREAMS` — список базовых URL API, куда проксируются запросы.
 - `TELEGRAM_BOT_USERNAME` — бот для логина/привязки Telegram.
+- `TELEGRAM_OAUTH_URL` — прямая ссылка Telegram OAuth (используется как fallback).
 - `AUTH_POPUP_ORIGIN` — домен окна авторизации (popup) для email/telegram.
 
 Если нужно добавить новый профиль — скопируй один из `PROFILE_*` и подставь свои значения.
