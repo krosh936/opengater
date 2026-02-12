@@ -30,8 +30,8 @@ const PROFILE_CDN = {
 };
 
 // Активный профиль API. Переключайте одну строку.
-// export const ACTIVE_PROFILE = PROFILE_EUTOCHKIN;
-export const ACTIVE_PROFILE = PROFILE_CDN;
+export const ACTIVE_PROFILE = PROFILE_EUTOCHKIN;
+// export const ACTIVE_PROFILE = PROFILE_CDN;
 
 // Список апстримов для прокси API.
 export const API_UPSTREAMS = ACTIVE_PROFILE.upstreams;
