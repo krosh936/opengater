@@ -69,7 +69,12 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
 
   useEffect(() => {
     loadAuthProfile().catch(() => {});
-  }, []);
+    const handleFocus = () => {
+      loadAuthProfile().catch(() => {});
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, [isAuthenticated, user?.id]);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {

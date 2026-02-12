@@ -18,7 +18,22 @@ const authFetch = async (path: string, init: RequestInit): Promise<Response> => 
   for (const baseUrl of AUTH_BACKEND_URLS) {
     try {
       const response = await fetch(`${baseUrl}${path}`, init);
+      (response as unknown as { __authBase?: string }).__authBase = baseUrl;
       if (response.ok) {
+        const contentType = response.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          try {
+            const clone = response.clone();
+            const data = await clone.json();
+            const detail = typeof data?.detail === 'string' ? data.detail.toLowerCase() : '';
+            if (detail.includes('invalid') && detail.includes('token')) {
+              lastError = new Error(`Auth backend invalid token: ${detail}`);
+              continue;
+            }
+          } catch {
+            // Игнорируем ошибки парсинга — возвращаем ответ как есть.
+          }
+        }
         return response;
       }
       // Если прокси/хост недоступен или токен валиден только на другом хосте — пробуем следующий.
@@ -34,6 +49,27 @@ const authFetch = async (path: string, init: RequestInit): Promise<Response> => 
   throw lastError || new Error('Auth backend request failed');
 };
 
+const getAuthBase = (response: Response): string => {
+  return (response as unknown as { __authBase?: string }).__authBase || 'unknown';
+};
+
+const getAuthErrorMessage = (response: Response, data: unknown): string => {
+  const base = getAuthBase(response);
+  if (typeof data === 'string' && data.trim()) {
+    return `${base}: ${data}`;
+  }
+  if (data && typeof data === 'object') {
+    const record = data as Record<string, unknown>;
+    const detail =
+      (typeof record.detail === 'string' && record.detail) ||
+      (typeof record.message === 'string' && record.message) ||
+      (typeof record.error === 'string' && record.error);
+    if (detail) {
+      return `${base}: ${detail}`;
+    }
+  }
+  return `${base}: Ошибка ${response.status}`;
+};
 
 export interface Currency {
   code: string;
@@ -488,7 +524,7 @@ export const sendEmailAuthCode = async (email: string, serviceName: string, lang
 
   if (!response.ok) {
     const data = await response.json().catch(() => ({}));
-    throw new Error(data.detail || 'Не удалось отправить код');
+    throw new Error(getAuthErrorMessage(response, data));
   }
 };
 
@@ -501,7 +537,7 @@ export const verifyEmailAuthCode = async (email: string, code: string): Promise<
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data.detail || 'Не удалось подтвердить код');
+    throw new Error(getAuthErrorMessage(response, data));
   }
 
   return data as AuthTokens & Record<string, unknown>;
@@ -516,7 +552,7 @@ export const verifyAuthToken = async (token: string): Promise<Record<string, unk
 
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data.detail || 'Не удалось проверить токен');
+    throw new Error(getAuthErrorMessage(response, data));
   }
 
   return data as Record<string, unknown>;

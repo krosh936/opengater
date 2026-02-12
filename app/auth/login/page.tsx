@@ -183,12 +183,20 @@ export default function LoginPage() {
 
   const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
+  const clearAuthTokens = () => {
+    if (typeof window === 'undefined') return;
+    localStorage.removeItem('auth_access_token');
+    localStorage.removeItem('auth_refresh_token');
+    localStorage.removeItem('auth_source');
+  };
+
   const handleTokenLogin = () => {
     const value = tokenInput.trim();
     if (!value) {
       setError(t('auth.token_required'));
       return;
     }
+    clearAuthTokens();
     setUserToken(value);
     window.location.href = '/';
   };
@@ -206,6 +214,7 @@ export default function LoginPage() {
         setIsSubmitting(true);
         const userId = Number(value);
         const token = await authUserById(userId);
+        clearAuthTokens();
         setUserToken(token);
         window.location.href = '/';
         return;
@@ -226,6 +235,7 @@ export default function LoginPage() {
       }
 
       // Фолбек: если это не email и не user_id — считаем, что это токен.
+      clearAuthTokens();
       setUserToken(value);
       window.location.href = '/';
     } catch (err) {
