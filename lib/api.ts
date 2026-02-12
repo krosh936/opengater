@@ -705,6 +705,72 @@ export interface AuthUserProfile {
   telegram?: string;
 }
 
+interface AuthMethodEntry {
+  auth_type?: string;
+  identifier?: string;
+  username?: string;
+  first_name?: string;
+  telegram_username?: string;
+  tg_username?: string;
+}
+
+const parseAuthMethods = (data: unknown): { email?: string; telegram?: string } => {
+  if (!data || typeof data !== 'object') return {};
+  const record = data as Record<string, unknown>;
+  const list =
+    (Array.isArray(record.current) && record.current) ||
+    (Array.isArray(record.methods) && record.methods) ||
+    (Array.isArray(record.items) && record.items) ||
+    (Array.isArray(data) ? (data as unknown[]) : []);
+
+  let email: string | undefined;
+  let telegram: string | undefined;
+
+  for (const entry of list) {
+    if (!entry || typeof entry !== 'object') continue;
+    const method = entry as AuthMethodEntry;
+    const type = (method.auth_type || '').toString().toLowerCase();
+
+    if (type === 'email' && method.identifier) {
+      email = method.identifier;
+    }
+
+    if ((type === 'telegram' || type === 'tg') && !telegram) {
+      const username = method.username || method.telegram_username || method.tg_username;
+      if (typeof username === 'string' && username.trim()) {
+        telegram = username.replace(/^@/, '');
+        continue;
+      }
+      if (typeof method.first_name === 'string' && method.first_name.trim()) {
+        telegram = method.first_name.trim();
+        continue;
+      }
+      if (typeof method.identifier === 'string' && method.identifier.trim()) {
+        telegram = method.identifier.trim();
+      }
+    }
+  }
+
+  return { email, telegram };
+};
+
+export const fetchAuthMethods = async (accessToken: string): Promise<{ email?: string; telegram?: string } | null> => {
+  const response = await authFetch(`/users/me/auth-methods`, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const data = await response.json().catch(() => ({}));
+  return parseAuthMethods(data);
+};
+
 export const fetchAuthProfile = async (accessToken: string): Promise<AuthUserProfile | null> => {
   const response = await authFetch(`/users/me`, {
     method: 'GET',
@@ -757,6 +823,18 @@ export const fetchAuthProfile = async (accessToken: string): Promise<AuthUserPro
     telegram =
       (typeof data.telegram === 'string' ? data.telegram : undefined) ||
       (typeof data.telegram_username === 'string' ? data.telegram_username : undefined);
+  }
+
+  if (!email || !telegram) {
+    try {
+      const methods = await fetchAuthMethods(accessToken);
+      if (methods) {
+        email = email || methods.email;
+        telegram = telegram || methods.telegram;
+      }
+    } catch {
+      // Игнорируем ошибки, чтобы не ломать профиль.
+    }
   }
 
   return { id, email, username, telegram };
@@ -822,6 +900,29 @@ export const createAuthUserFromTelegram = async (
   }
 
   throw fallback.error || primary.error || new Error('Не удалось получить токен');
+};
+
+export const linkTelegramToAuth = async (
+  accessToken: string,
+  payload: TelegramAuthPayload
+): Promise<Record<string, unknown>> => {
+  const response = await authFetch(`/users/me/link/telegram/verify`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(getAuthErrorMessage(response, data));
+    (error as { status?: number }).status = response.status;
+    throw error;
+  }
+
+  return data as Record<string, unknown>;
 };
 
 

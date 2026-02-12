@@ -4,7 +4,7 @@ import './ProfilePage.css';
 import { useUser } from '@/contexts/UserContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useTheme } from '@/contexts/ThemeContext';
-import { fetchAuthProfile } from '@/lib/api';
+import { fetchAuthProfile, linkTelegramToAuth, TelegramAuthPayload } from '@/lib/api';
 
 interface ProfilePageProps {
   onBack?: () => void;
@@ -19,6 +19,14 @@ const getInitials = (value: string) => {
   return value.slice(0, 2).toUpperCase();
 };
 
+const formatTelegramDisplay = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('@')) return trimmed;
+  const handleLike = /^[a-zA-Z0-9_]{3,}$/.test(trimmed);
+  return handleLike ? `@${trimmed}` : trimmed;
+};
+
 export default function ProfilePage({ onBack }: ProfilePageProps) {
   const { user, isLoading, error, isAuthenticated, refreshUser } = useUser();
   const { t, language } = useLanguage();
@@ -29,6 +37,11 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
   const popupRef = useRef<Window | null>(null);
   const popupOrigin = 'https://lka.bot.eutochkin.com';
 
+  const getAuthToken = () => {
+    if (typeof window === 'undefined') return null;
+    return localStorage.getItem('auth_access_token') || localStorage.getItem('access_token');
+  };
+
   useEffect(() => {
     if (!toast) return;
     const timer = setTimeout(() => setToast(null), 2200);
@@ -38,10 +51,10 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
   const rawUsername = user?.username || '';
   const authInfo = useMemo(() => {
     const email = linkedEmail || (rawUsername.includes('@') ? rawUsername : '');
-    const telegramSource = linkedTelegram || rawUsername;
-    const telegram = telegramSource && !telegramSource.includes('@')
-      ? (telegramSource.startsWith('@') ? telegramSource : `@${telegramSource}`)
-      : '';
+    const telegramSource =
+      linkedTelegram ||
+      (rawUsername && !rawUsername.includes('@') ? rawUsername : '');
+    const telegram = telegramSource ? formatTelegramDisplay(telegramSource) : '';
     return { email, telegram };
   }, [linkedEmail, linkedTelegram, rawUsername]);
   const displayName = user?.full_name || user?.username || authInfo.email || authInfo.telegram || '---';
@@ -55,7 +68,7 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
 
   const loadAuthProfile = async () => {
     if (typeof window === 'undefined') return;
-    const token = localStorage.getItem('auth_access_token');
+    const token = getAuthToken();
     if (!token) {
       setLinkedEmail(null);
       setLinkedTelegram(null);
@@ -82,13 +95,43 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
       const data = event.data as { type?: string };
 
       if (data.type === 'request_link_token') {
-        const token = typeof window !== 'undefined' ? localStorage.getItem('auth_access_token') : null;
+        const token = getAuthToken();
         if (!token) {
           setToast(t('profile.link_email_requires_auth'));
           return;
         }
         // Отправляем токен в popup, чтобы завершить привязку email.
         (event.source as Window | null)?.postMessage({ type: 'link_token', token }, event.origin);
+        return;
+      }
+
+      if (data.type === 'telegram_link_data' && (data as { user?: TelegramAuthPayload }).user) {
+        const token = getAuthToken();
+        if (!token) {
+          setToast(t('profile.link_telegram_requires_auth'));
+          return;
+        }
+        const payload = (data as { user: TelegramAuthPayload }).user;
+        linkTelegramToAuth(token, payload)
+          .then(() => {
+            setToast(t('profile.telegram_linked'));
+            refreshUser({ silent: true }).catch(() => {});
+            loadAuthProfile().catch(() => {});
+            if (popupRef.current && !popupRef.current.closed) {
+              popupRef.current.close();
+            }
+          })
+          .catch((err: unknown) => {
+            const status = (err as { status?: number })?.status;
+            if (status === 409) {
+              setToast(t('profile.telegram_linked'));
+              refreshUser({ silent: true }).catch(() => {});
+              loadAuthProfile().catch(() => {});
+              return;
+            }
+            const message = err instanceof Error ? err.message : t('common.error_prefix');
+            setToast(message);
+          });
         return;
       }
 
@@ -107,7 +150,7 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
   }, [refreshUser, t]);
 
   const openEmailLinkPopup = (mode: 'add' | 'change') => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('auth_access_token') : null;
+    const token = getAuthToken();
     if (!token) {
       setToast(t('profile.link_email_requires_auth'));
       return;
@@ -126,6 +169,30 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
     popupRef.current = window.open(
       url.toString(),
       'opengater_email_link',
+      'width=520,height=720,menubar=no,toolbar=no,location=no,status=no,scrollbars=yes'
+    );
+    if (!popupRef.current) {
+      setToast(t('profile.popup_blocked'));
+    }
+  };
+
+  const openTelegramLinkPopup = () => {
+    const token = getAuthToken();
+    if (!token) {
+      setToast(t('profile.link_telegram_requires_auth'));
+      return;
+    }
+
+    const lang = language === 'am' ? 'hy' : language;
+    const url = new URL(popupOrigin);
+    url.searchParams.set('link_telegram', '1');
+    url.searchParams.set('user_name', displayName || 'User');
+    url.searchParams.set('theme', theme || 'light');
+    url.searchParams.set('lang', lang);
+
+    popupRef.current = window.open(
+      url.toString(),
+      'opengater_telegram_link',
       'width=520,height=720,menubar=no,toolbar=no,location=no,status=no,scrollbars=yes'
     );
     if (!popupRef.current) {
@@ -284,7 +351,7 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
         </div>
 
         {!authInfo.telegram && (
-          <button type="button" className="tg-link-btn" onClick={handleComingSoon}>
+          <button type="button" className="tg-link-btn" onClick={openTelegramLinkPopup}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
               <path d="M20.665 3.717l-17.73 6.837c-1.21.486-1.203 1.161-.222 1.462l4.552 1.42 10.532-6.645c.498-.303.953-.14.579.192l-8.533 7.701h-.002l.002.001-.314 4.692c.46 0 .663-.211.921-.46l2.211-2.15 4.599 3.397c.848.467 1.457.227 1.668-.787l3.019-14.228c.309-1.239-.473-1.8-1.282-1.432z" />
             </svg>

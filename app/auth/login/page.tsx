@@ -1,5 +1,5 @@
 ﻿'use client'
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import './AuthPage.css';
 import {
   authUserById,
@@ -33,10 +33,8 @@ export default function LoginPage() {
   const [step, setStep] = useState<'email' | 'code'>('email');
   const [pendingEmail, setPendingEmail] = useState('');
   const [resendIn, setResendIn] = useState(0);
-  const telegramWidgetRef = useRef<HTMLDivElement>(null);
-  const [telegramBot, setTelegramBot] = useState('kostik_chukcha_bot');
-  const [telegramWidgetReady, setTelegramWidgetReady] = useState(false);
-  const [telegramBotTried, setTelegramBotTried] = useState<string[]>([]);
+  const [telegramBotId, setTelegramBotId] = useState('7831391633');
+  const [telegramBotName, setTelegramBotName] = useState('opengater_vpn_bot');
 
   const authLanguage = language === 'am' ? 'hy' : language;
   const titleText = step === 'code' ? t('auth.email_code_title') : t('auth.welcome_title');
@@ -50,7 +48,6 @@ export default function LoginPage() {
   const tokenToggleText = t('auth.use_token');
   const tokenPlaceholder = t('auth.token_placeholder');
   const tokenButtonText = t('auth.token_button');
-  const [useTelegramWidget, setUseTelegramWidget] = useState(true);
 
   useEffect(() => {
     if (resendIn <= 0) return;
@@ -92,15 +89,28 @@ export default function LoginPage() {
     window.onTelegramAuth = async (user) => {
       try {
         setError('');
-        const token = await createAuthUserFromTelegram(user);
-        // Пытаемся получить auth-токены для привязки email.
         const authTokens = await verifyTelegramAuth(user);
-        if (authTokens && typeof window !== 'undefined') {
+        if (authTokens?.access_token && typeof window !== 'undefined') {
           localStorage.setItem('auth_access_token', authTokens.access_token);
+          localStorage.setItem('access_token', authTokens.access_token);
           if (authTokens.refresh_token) {
             localStorage.setItem('auth_refresh_token', authTokens.refresh_token);
           }
+          localStorage.setItem('auth_source', 'telegram');
         }
+
+        if (authTokens?.access_token) {
+          try {
+            await fetchUserInfoByToken(authTokens.access_token);
+            setUserToken(authTokens.access_token);
+            window.location.href = '/';
+            return;
+          } catch {
+            // Если JWT не подходит для основного API — пробуем старый токен.
+          }
+        }
+
+        const token = await createAuthUserFromTelegram(user);
         if (typeof window !== 'undefined') {
           localStorage.setItem('auth_source', 'telegram');
         }
@@ -115,69 +125,52 @@ export default function LoginPage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
-    const urlMode = params.get('tg')?.toLowerCase();
-    // По умолчанию используем виджет. Фолбек — только если явно указан ?tg=fallback.
-    setUseTelegramWidget(urlMode !== 'fallback');
-    const botFromUrl = params.get('tg_bot');
-    if (botFromUrl) {
-      localStorage.setItem('telegram_login_bot', botFromUrl);
+    const botIdFromUrl = params.get('tg_bot_id') || params.get('tg_bot');
+    if (botIdFromUrl && /^\d+$/.test(botIdFromUrl)) {
+      localStorage.setItem('telegram_login_bot_id', botIdFromUrl);
     }
-    const storedBot = localStorage.getItem('telegram_login_bot');
-    setTelegramBot(botFromUrl || storedBot || 'kostik_chukcha_bot');
+    const storedBotId = localStorage.getItem('telegram_login_bot_id');
+    setTelegramBotId(botIdFromUrl && /^\d+$/.test(botIdFromUrl) ? botIdFromUrl : storedBotId || '7831391633');
+
+    const botNameFromUrl = params.get('tg_bot');
+    if (botNameFromUrl && !/^\d+$/.test(botNameFromUrl)) {
+      localStorage.setItem('telegram_login_bot', botNameFromUrl);
+    }
+    const storedBotName = localStorage.getItem('telegram_login_bot');
+    setTelegramBotName(
+      botNameFromUrl && !/^\d+$/.test(botNameFromUrl) ? botNameFromUrl : storedBotName || 'opengater_vpn_bot'
+    );
   }, []);
 
   useEffect(() => {
-    if (!useTelegramWidget) return;
-    if (!telegramWidgetRef.current) return;
-    telegramWidgetRef.current.innerHTML = '';
-    setTelegramWidgetReady(false);
+    if (typeof window === 'undefined') return;
+    if (window.Telegram?.Login) {
+      return;
+    }
     const script = document.createElement('script');
     script.src = 'https://telegram.org/js/telegram-widget.js?22';
     script.async = true;
-    script.setAttribute('data-telegram-login', telegramBot);
-    script.setAttribute('data-size', 'large');
-    script.setAttribute('data-radius', '12');
-    script.setAttribute('data-onauth', 'onTelegramAuth(user)');
-    script.setAttribute('data-request-access', 'write');
-    telegramWidgetRef.current.appendChild(script);
+    document.head.appendChild(script);
+  }, []);
 
-    const observer = new MutationObserver(() => {
-      if (!telegramWidgetRef.current) return;
-      const hasIframe = telegramWidgetRef.current.querySelector('iframe');
-      if (hasIframe) {
-        setTelegramWidgetReady(true);
-      }
-    });
-    observer.observe(telegramWidgetRef.current, { childList: true, subtree: true });
-
-    const fallbackTimer = window.setTimeout(() => {
-      if (!telegramWidgetRef.current) return;
-      const hasIframe = telegramWidgetRef.current.querySelector('iframe');
-      if (hasIframe) {
-        setTelegramWidgetReady(true);
-        return;
-      }
-
-      const tried = new Set(telegramBotTried);
-      tried.add(telegramBot);
-      const fallbackBot = telegramBot === 'kostik_chukcha_bot' ? 'opengater_vpn_bot' : 'kostik_chukcha_bot';
-      if (!tried.has(fallbackBot)) {
-        setTelegramBotTried(Array.from(tried));
-        setTelegramBot(fallbackBot);
-        return;
-      }
-
-      setUseTelegramWidget(false);
-    }, 1500);
-    return () => {
-      observer.disconnect();
-      window.clearTimeout(fallbackTimer);
-    };
-  }, [useTelegramWidget, telegramBot, telegramBotTried]);
+  const handleTelegramLogin = () => {
+    if (typeof window === 'undefined') return;
+    const login = window.Telegram?.Login;
+    const botId = Number(telegramBotId);
+    if (login?.auth && Number.isFinite(botId)) {
+      login.auth({ bot_id: botId, request_access: 'write' }, (user?: TelegramAuthPayload) => {
+        if (user) {
+          window.onTelegramAuth?.(user);
+        }
+      });
+      return;
+    }
+    handleTelegramFallback();
+  };
 
   const handleTelegramFallback = () => {
     if (typeof window !== 'undefined') {
-      const bot = telegramBot.replace(/^@/, '');
+      const bot = telegramBotName.replace(/^@/, '');
       window.open(`https://t.me/${bot}`, '_blank', 'noopener,noreferrer');
     }
   };
@@ -189,6 +182,7 @@ export default function LoginPage() {
     localStorage.removeItem('auth_access_token');
     localStorage.removeItem('auth_refresh_token');
     localStorage.removeItem('auth_source');
+    localStorage.removeItem('access_token');
   };
 
   const handleTokenLogin = () => {
@@ -491,13 +485,12 @@ export default function LoginPage() {
               <button
                 type="button"
                 className="page-module___8aEwW__btn page-module___8aEwW__btnOutline page-module___8aEwW__telegramBtn"
-                onClick={!telegramWidgetReady ? handleTelegramFallback : undefined}
+                onClick={handleTelegramLogin}
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M20.665 3.717l-17.73 6.837c-1.21.486-1.203 1.161-.222 1.462l4.552 1.42 10.532-6.645c.498-.303.953-.14.579.192l-8.533 7.701h-.002l.002.001-.314 4.692c.46 0 .663-.211.921-.46l2.211-2.15 4.599 3.397c.848.467 1.457.227 1.668-.787l3.019-14.228c.309-1.239-.473-1.8-1.282-1.432z"></path>
                 </svg>
                 {telegramText}
-                {useTelegramWidget && <div ref={telegramWidgetRef} className="page-module___8aEwW__telegramWidget"></div>}
               </button>
 
               <div className="page-module___8aEwW__tokenToggle">
