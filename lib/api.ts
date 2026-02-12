@@ -560,21 +560,32 @@ export const verifyAuthToken = async (token: string): Promise<Record<string, unk
   return data as Record<string, unknown>;
 };
 
+const parseNumericId = (raw: unknown): number | null => {
+  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+    const direct = Number(trimmed);
+    if (!Number.isNaN(direct)) return direct;
+    const match = trimmed.match(/(\d+)/);
+    if (match) {
+      const parsed = Number(match[1]);
+      return Number.isNaN(parsed) ? null : parsed;
+    }
+  }
+  return null;
+};
+
 const extractUserId = (data: unknown): number | null => {
   if (!data || typeof data !== 'object') return null;
   const record = data as Record<string, unknown>;
   const raw =
-    record.user_id ||
-    record.id ||
-    record.uid ||
-    record.sub ||
+    record.user_id ??
+    record.id ??
+    record.uid ??
+    record.sub ??
     (typeof record.user === 'object' && record.user ? (record.user as Record<string, unknown>).id : undefined);
-  if (typeof raw === 'number') return raw;
-  if (typeof raw === 'string') {
-    const parsed = Number(raw);
-    return Number.isNaN(parsed) ? null : parsed;
-  }
-  return null;
+  return parseNumericId(raw);
 };
 
 export const fetchAuthUserId = async (accessToken: string): Promise<number | null> => {

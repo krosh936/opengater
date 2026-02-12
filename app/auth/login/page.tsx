@@ -245,6 +245,22 @@ export default function LoginPage() {
     }
   };
 
+  const parseNumericId = (raw: unknown): number | null => {
+    if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (!trimmed) return null;
+      const direct = Number(trimmed);
+      if (!Number.isNaN(direct)) return direct;
+      const match = trimmed.match(/(\d+)/);
+      if (match) {
+        const parsed = Number(match[1]);
+        return Number.isNaN(parsed) ? null : parsed;
+      }
+    }
+    return null;
+  };
+
   const decodeUserIdFromJwt = (token: string): number | null => {
     const parts = token.split('.');
     if (parts.length < 2) return null;
@@ -259,11 +275,7 @@ export default function LoginPage() {
       );
       const payload = JSON.parse(json) as { user_id?: number | string; sub?: number | string };
       const raw = payload.user_id ?? payload.sub;
-      if (typeof raw === 'number') return raw;
-      if (typeof raw === 'string') {
-        const num = Number(raw);
-        return Number.isNaN(num) ? null : num;
-      }
+      return parseNumericId(raw);
     } catch {
       return null;
     }
@@ -272,17 +284,12 @@ export default function LoginPage() {
 
   const extractUserIdFromRecord = (data: Record<string, unknown>): number | null => {
     const raw =
-      data.user_id ||
-      data.id ||
-      data.uid ||
-      data.sub ||
+      data.user_id ??
+      data.id ??
+      data.uid ??
+      data.sub ??
       (typeof data.user === 'object' && data.user ? (data.user as Record<string, unknown>).id : undefined);
-    if (typeof raw === 'number') return raw;
-    if (typeof raw === 'string') {
-      const parsed = Number(raw);
-      return Number.isNaN(parsed) ? null : parsed;
-    }
-    return null;
+    return parseNumericId(raw);
   };
 
   const handleVerifyCode = async (event: React.FormEvent) => {
