@@ -656,9 +656,11 @@ const parseNumericId = (raw: unknown): number | null => {
   if (typeof raw === 'string') {
     const trimmed = raw.trim();
     if (!trimmed) return null;
-    const direct = Number(trimmed);
-    if (!Number.isNaN(direct)) return direct;
-    const match = trimmed.match(/(\d+)/);
+    if (/^\d+$/.test(trimmed)) {
+      const direct = Number(trimmed);
+      return Number.isNaN(direct) ? null : direct;
+    }
+    const match = trimmed.match(/\b(?:user|uid|id)\s*[:=]\s*(\d+)\b/i);
     if (match) {
       const parsed = Number(match[1]);
       return Number.isNaN(parsed) ? null : parsed;
@@ -718,19 +720,44 @@ export const fetchAuthProfile = async (accessToken: string): Promise<AuthUserPro
 
   const data = await response.json().catch(() => ({})) as Record<string, unknown>;
   const id = extractUserId(data) ?? undefined;
-  const email =
-    (typeof data.email === 'string' ? data.email : undefined) ||
-    (typeof data.user === 'object' && data.user && typeof (data.user as Record<string, unknown>).email === 'string'
-      ? String((data.user as Record<string, unknown>).email)
-      : undefined);
+
+  let email: string | undefined;
+  let telegram: string | undefined;
+
+  if (Array.isArray(data.auth_methods)) {
+    for (const method of data.auth_methods) {
+      if (!method || typeof method !== 'object') continue;
+      const record = method as Record<string, unknown>;
+      const authType = typeof record.auth_type === 'string' ? record.auth_type.toLowerCase() : '';
+      const identifier = typeof record.identifier === 'string' ? record.identifier : undefined;
+      if (authType === 'email' && identifier) {
+        email = identifier;
+      }
+      if ((authType === 'telegram' || authType === 'tg') && identifier) {
+        telegram = identifier;
+      }
+    }
+  }
+
+  if (!email) {
+    email =
+      (typeof data.email === 'string' ? data.email : undefined) ||
+      (typeof data.user === 'object' && data.user && typeof (data.user as Record<string, unknown>).email === 'string'
+        ? String((data.user as Record<string, unknown>).email)
+        : undefined);
+  }
+
   const username =
     (typeof data.username === 'string' ? data.username : undefined) ||
     (typeof data.user === 'object' && data.user && typeof (data.user as Record<string, unknown>).username === 'string'
       ? String((data.user as Record<string, unknown>).username)
       : undefined);
-  const telegram =
-    (typeof data.telegram === 'string' ? data.telegram : undefined) ||
-    (typeof data.telegram_username === 'string' ? data.telegram_username : undefined);
+
+  if (!telegram) {
+    telegram =
+      (typeof data.telegram === 'string' ? data.telegram : undefined) ||
+      (typeof data.telegram_username === 'string' ? data.telegram_username : undefined);
+  }
 
   return { id, email, username, telegram };
 };

@@ -251,9 +251,11 @@ export default function LoginPage() {
     if (typeof raw === 'string') {
       const trimmed = raw.trim();
       if (!trimmed) return null;
-      const direct = Number(trimmed);
-      if (!Number.isNaN(direct)) return direct;
-      const match = trimmed.match(/(\d+)/);
+      if (/^\d+$/.test(trimmed)) {
+        const direct = Number(trimmed);
+        return Number.isNaN(direct) ? null : direct;
+      }
+      const match = trimmed.match(/\b(?:user|uid|id)\s*[:=]\s*(\d+)\b/i);
       if (match) {
         const parsed = Number(match[1]);
         return Number.isNaN(parsed) ? null : parsed;

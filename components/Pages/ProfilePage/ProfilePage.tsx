@@ -35,16 +35,7 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
     return () => clearTimeout(timer);
   }, [toast]);
 
-  const displayName = user?.full_name || user?.username || '---';
   const rawUsername = user?.username || '';
-  const displayUsername =
-    rawUsername && rawUsername !== displayName
-      ? (rawUsername.includes('@') ? rawUsername : `@${rawUsername.replace(/^@/, '')}`)
-      : '';
-  const initials = getInitials(displayName);
-  const uid = user?.id ? String(user.id) : '';
-  const subscriptionActive = !!user && new Date(user.expire).getTime() > Date.now();
-
   const authInfo = useMemo(() => {
     const email = linkedEmail || (rawUsername.includes('@') ? rawUsername : '');
     const telegramSource = linkedTelegram || rawUsername;
@@ -53,6 +44,14 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
       : '';
     return { email, telegram };
   }, [linkedEmail, linkedTelegram, rawUsername]);
+  const displayName = user?.full_name || user?.username || authInfo.email || authInfo.telegram || '---';
+  const displayUsername =
+    rawUsername && rawUsername !== displayName
+      ? (rawUsername.includes('@') ? rawUsername : `@${rawUsername.replace(/^@/, '')}`)
+      : '';
+  const initials = getInitials(displayName);
+  const uid = user?.id ? String(user.id) : '';
+  const subscriptionActive = !!user && new Date(user.expire).getTime() > Date.now();
 
   const loadAuthProfile = async () => {
     if (typeof window === 'undefined') return;
