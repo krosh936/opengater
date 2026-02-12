@@ -13,6 +13,57 @@ const AUTH_BACKEND_URLS = [
   AUTH_BACKEND_FALLBACK_URL,
 ];
 
+const CACHE_PREFIX = 'opengater_cache';
+const CACHE_TTL = {
+  languages: 12 * 60 * 60 * 1000,
+  currencies: 12 * 60 * 60 * 1000,
+  user: 5 * 60 * 1000,
+  authProfile: 10 * 60 * 1000,
+};
+
+const cacheSet = (key: string, data: unknown, meta?: Record<string, unknown>) => {
+  if (typeof window === 'undefined') return;
+  try {
+    const payload = { ts: Date.now(), data, ...meta };
+    localStorage.setItem(`${CACHE_PREFIX}:${key}`, JSON.stringify(payload));
+  } catch {
+    // Игнорируем ошибки кеша.
+  }
+};
+
+const cacheGet = <T>(key: string, maxAgeMs?: number): T | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(`${CACHE_PREFIX}:${key}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { ts?: number; data?: T };
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (maxAgeMs && parsed.ts && Date.now() - parsed.ts > maxAgeMs) {
+      return null;
+    }
+    return (parsed.data ?? null) as T | null;
+  } catch {
+    return null;
+  }
+};
+
+const cacheGetWithMeta = <T>(key: string, maxAgeMs?: number): { data: T | null; meta: Record<string, unknown> } => {
+  if (typeof window === 'undefined') return { data: null, meta: {} };
+  try {
+    const raw = localStorage.getItem(`${CACHE_PREFIX}:${key}`);
+    if (!raw) return { data: null, meta: {} };
+    const parsed = JSON.parse(raw) as { ts?: number; data?: T } & Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object') return { data: null, meta: {} };
+    if (maxAgeMs && parsed.ts && Date.now() - parsed.ts > maxAgeMs) {
+      return { data: null, meta: {} };
+    }
+    const { data, ...meta } = parsed;
+    return { data: (data ?? null) as T | null, meta };
+  } catch {
+    return { data: null, meta: {} };
+  }
+};
+
 const authFetch = async (path: string, init: RequestInit): Promise<Response> => {
   let lastError: Error | null = null;
   const isBrowser = typeof window !== 'undefined';
@@ -233,6 +284,7 @@ export const fetchUserInfo = async (): Promise<UserInfo> => {
   });
 
   let lastError: Error | null = null;
+  let lastStatus: number | null = null;
   for (const attempt of attempts) {
     try {
       const response = await fetch(attempt.url, {
@@ -246,6 +298,7 @@ export const fetchUserInfo = async (): Promise<UserInfo> => {
       });
 
       if (!response.ok) {
+        lastStatus = response.status;
         if ([401, 403, 404].includes(response.status)) {
           lastError = new Error('Недействительный токен. Пожалуйста, войдите снова');
           continue;
@@ -262,6 +315,7 @@ export const fetchUserInfo = async (): Promise<UserInfo> => {
       }
 
       const data = await response.json();
+      cacheSet('user', data, { token });
       return data;
     } catch (error) {
       lastError = error instanceof Error ? error : new Error('Неизвестная ошибка при загрузке данных');
@@ -269,6 +323,16 @@ export const fetchUserInfo = async (): Promise<UserInfo> => {
   }
 
   if (lastError) {
+    const isAuthError =
+      lastError.message.includes('Недействительный токен') ||
+      lastError.message.includes('401') ||
+      lastError.message.includes('403');
+    if (!isAuthError && (lastStatus === null || lastStatus >= 500)) {
+      const { data, meta } = cacheGetWithMeta<UserInfo>('user', CACHE_TTL.user);
+      if (data && typeof meta.token === 'string' && meta.token === token) {
+        return data;
+      }
+    }
     throw lastError;
   }
   throw new Error('Неизвестная ошибка при загрузке данных');
@@ -313,10 +377,14 @@ export const fetchCurrencies = async (): Promise<Currency[]> => {
   });
 
   if (!response.ok) {
+    const cached = cacheGet<Currency[]>('currencies', CACHE_TTL.currencies);
+    if (cached) return cached;
     throw new Error(`Ошибка сервера: ${response.status}`);
   }
 
-  return response.json();
+  const data = await response.json();
+  cacheSet('currencies', data);
+  return data;
 };
 
 export const fetchLanguages = async (): Promise<LanguageOption[]> => {
@@ -345,6 +413,7 @@ export const fetchLanguages = async (): Promise<LanguageOption[]> => {
 
       const data = await response.json();
       if (Array.isArray(data)) {
+        cacheSet('languages', data);
         return data;
       }
     } catch (error) {
@@ -353,6 +422,8 @@ export const fetchLanguages = async (): Promise<LanguageOption[]> => {
   }
 
   if (lastError) {
+    const cached = cacheGet<LanguageOption[]>('languages', CACHE_TTL.languages);
+    if (cached) return cached;
     throw lastError;
   }
 
@@ -585,6 +656,7 @@ export const fetchUserInfoByToken = async (token: string): Promise<UserInfo> => 
   });
 
   let lastError: Error | null = null;
+  let lastStatus: number | null = null;
   for (const attempt of attempts) {
     const response = await fetch(attempt.url, {
       method: 'GET',
@@ -597,6 +669,7 @@ export const fetchUserInfoByToken = async (token: string): Promise<UserInfo> => 
     });
 
     if (!response.ok) {
+      lastStatus = response.status;
       if ([401, 403, 404].includes(response.status)) {
         lastError = new Error('Недействительный токен. Пожалуйста, войдите снова');
         continue;
@@ -612,10 +685,22 @@ export const fetchUserInfoByToken = async (token: string): Promise<UserInfo> => 
       continue;
     }
 
-    return response.json();
+    const data = await response.json();
+    cacheSet('user', data, { token });
+    return data;
   }
 
   if (lastError) {
+    const isAuthError =
+      lastError.message.includes('Недействительный токен') ||
+      lastError.message.includes('401') ||
+      lastError.message.includes('403');
+    if (!isAuthError && (lastStatus === null || lastStatus >= 500)) {
+      const { data, meta } = cacheGetWithMeta<UserInfo>('user', CACHE_TTL.user);
+      if (data && typeof meta.token === 'string' && meta.token === token) {
+        return data;
+      }
+    }
     throw lastError;
   }
   throw new Error('Неизвестная ошибка при загрузке данных');
@@ -779,11 +864,17 @@ export const fetchAuthMethods = async (accessToken: string): Promise<{ email?: s
   });
 
   if (!response.ok) {
+    const cached = cacheGetWithMeta<{ email?: string; telegram?: string; telegramLinked?: boolean }>('auth_profile', CACHE_TTL.authProfile);
+    if (cached.data && cached.meta?.token === accessToken) {
+      return cached.data;
+    }
     return null;
   }
 
   const data = await response.json().catch(() => ({}));
-  return parseAuthMethods(data);
+  const parsed = parseAuthMethods(data);
+  cacheSet('auth_profile', parsed, { token: accessToken });
+  return parsed;
 };
 
 export const fetchAuthProfile = async (accessToken: string): Promise<AuthUserProfile | null> => {
@@ -796,6 +887,10 @@ export const fetchAuthProfile = async (accessToken: string): Promise<AuthUserPro
   });
 
   if (!response.ok) {
+    const cached = cacheGetWithMeta<AuthUserProfile>('auth_profile', CACHE_TTL.authProfile);
+    if (cached.data && cached.meta?.token === accessToken) {
+      return cached.data;
+    }
     return null;
   }
 
@@ -872,7 +967,9 @@ export const fetchAuthProfile = async (accessToken: string): Promise<AuthUserPro
     }
   }
 
-  return { id, email, username, telegram, telegramLinked };
+  const profile = { id, email, username, telegram, telegramLinked };
+  cacheSet('auth_profile', profile, { token: accessToken });
+  return profile;
 };
 
 export const verifyTelegramAuth = async (
