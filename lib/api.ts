@@ -703,6 +703,7 @@ export interface AuthUserProfile {
   email?: string;
   username?: string;
   telegram?: string;
+  telegramLinked?: boolean;
 }
 
 interface AuthMethodEntry {
@@ -714,7 +715,16 @@ interface AuthMethodEntry {
   tg_username?: string;
 }
 
-const parseAuthMethods = (data: unknown): { email?: string; telegram?: string } => {
+const isNumericIdentifier = (value: string): boolean => /^\d+$/.test(value.trim());
+
+const normalizeTelegramValue = (value?: string): string | undefined => {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!trimmed || isNumericIdentifier(trimmed)) return undefined;
+  return trimmed.replace(/^@/, '');
+};
+
+const parseAuthMethods = (data: unknown): { email?: string; telegram?: string; telegramLinked?: boolean } => {
   if (!data || typeof data !== 'object') return {};
   const record = data as Record<string, unknown>;
   const list =
@@ -725,6 +735,7 @@ const parseAuthMethods = (data: unknown): { email?: string; telegram?: string } 
 
   let email: string | undefined;
   let telegram: string | undefined;
+  let telegramLinked = false;
 
   for (const entry of list) {
     if (!entry || typeof entry !== 'object') continue;
@@ -735,26 +746,30 @@ const parseAuthMethods = (data: unknown): { email?: string; telegram?: string } 
       email = method.identifier;
     }
 
-    if ((type === 'telegram' || type === 'tg') && !telegram) {
+    if (type === 'telegram' || type === 'tg') {
+      telegramLinked = true;
+      if (telegram) continue;
       const username = method.username || method.telegram_username || method.tg_username;
-      if (typeof username === 'string' && username.trim()) {
-        telegram = username.replace(/^@/, '');
+      const normalized = normalizeTelegramValue(
+        typeof username === 'string' ? username : typeof method.first_name === 'string' ? method.first_name : undefined
+      );
+      if (normalized) {
+        telegram = normalized;
         continue;
       }
-      if (typeof method.first_name === 'string' && method.first_name.trim()) {
-        telegram = method.first_name.trim();
-        continue;
-      }
-      if (typeof method.identifier === 'string' && method.identifier.trim()) {
-        telegram = method.identifier.trim();
+      if (typeof method.identifier === 'string') {
+        const fallback = normalizeTelegramValue(method.identifier);
+        if (fallback) {
+          telegram = fallback;
+        }
       }
     }
   }
 
-  return { email, telegram };
+  return { email, telegram, telegramLinked };
 };
 
-export const fetchAuthMethods = async (accessToken: string): Promise<{ email?: string; telegram?: string } | null> => {
+export const fetchAuthMethods = async (accessToken: string): Promise<{ email?: string; telegram?: string; telegramLinked?: boolean } | null> => {
   const response = await authFetch(`/users/me/auth-methods`, {
     method: 'GET',
     headers: {
@@ -789,6 +804,7 @@ export const fetchAuthProfile = async (accessToken: string): Promise<AuthUserPro
 
   let email: string | undefined;
   let telegram: string | undefined;
+  let telegramLinked = false;
 
   if (Array.isArray(data.auth_methods)) {
     for (const method of data.auth_methods) {
@@ -799,8 +815,22 @@ export const fetchAuthProfile = async (accessToken: string): Promise<AuthUserPro
       if (authType === 'email' && identifier) {
         email = identifier;
       }
-      if ((authType === 'telegram' || authType === 'tg') && identifier) {
-        telegram = identifier;
+      if (authType === 'telegram' || authType === 'tg') {
+        telegramLinked = true;
+        const normalized = normalizeTelegramValue(
+          typeof record.username === 'string'
+            ? record.username
+            : typeof record.telegram_username === 'string'
+              ? record.telegram_username
+              : typeof record.tg_username === 'string'
+                ? record.tg_username
+                : typeof record.first_name === 'string'
+                  ? record.first_name
+                  : identifier
+        );
+        if (normalized) {
+          telegram = normalized;
+        }
       }
     }
   }
@@ -821,8 +851,12 @@ export const fetchAuthProfile = async (accessToken: string): Promise<AuthUserPro
 
   if (!telegram) {
     telegram =
-      (typeof data.telegram === 'string' ? data.telegram : undefined) ||
-      (typeof data.telegram_username === 'string' ? data.telegram_username : undefined);
+      normalizeTelegramValue(typeof data.telegram === 'string' ? data.telegram : undefined) ||
+      normalizeTelegramValue(typeof data.telegram_username === 'string' ? data.telegram_username : undefined);
+  }
+
+  if (telegram) {
+    telegramLinked = true;
   }
 
   if (!email || !telegram) {
@@ -831,13 +865,14 @@ export const fetchAuthProfile = async (accessToken: string): Promise<AuthUserPro
       if (methods) {
         email = email || methods.email;
         telegram = telegram || methods.telegram;
+        telegramLinked = telegramLinked || !!methods.telegramLinked || !!methods.telegram;
       }
     } catch {
       // Игнорируем ошибки, чтобы не ломать профиль.
     }
   }
 
-  return { id, email, username, telegram };
+  return { id, email, username, telegram, telegramLinked };
 };
 
 export const verifyTelegramAuth = async (

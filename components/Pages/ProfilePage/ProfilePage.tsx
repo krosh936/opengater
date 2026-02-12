@@ -22,8 +22,9 @@ const getInitials = (value: string) => {
 const formatTelegramDisplay = (value: string): string => {
   const trimmed = value.trim();
   if (!trimmed) return '';
+  if (/^\d+$/.test(trimmed)) return '';
   if (trimmed.startsWith('@')) return trimmed;
-  const handleLike = /^[a-zA-Z0-9_]{3,}$/.test(trimmed);
+  const handleLike = /^(?=.*[a-zA-Z_])[a-zA-Z0-9_]{3,}$/.test(trimmed);
   return handleLike ? `@${trimmed}` : trimmed;
 };
 
@@ -34,6 +35,7 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
   const [toast, setToast] = useState<string | null>(null);
   const [linkedEmail, setLinkedEmail] = useState<string | null>(null);
   const [linkedTelegram, setLinkedTelegram] = useState<string | null>(null);
+  const [telegramLinked, setTelegramLinked] = useState(false);
   const popupRef = useRef<Window | null>(null);
   const popupOrigin = 'https://lka.bot.eutochkin.com';
 
@@ -53,10 +55,10 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
     const email = linkedEmail || (rawUsername.includes('@') ? rawUsername : '');
     const telegramSource =
       linkedTelegram ||
-      (rawUsername && !rawUsername.includes('@') ? rawUsername : '');
+      (telegramLinked && rawUsername && !rawUsername.includes('@') ? rawUsername : '');
     const telegram = telegramSource ? formatTelegramDisplay(telegramSource) : '';
-    return { email, telegram };
-  }, [linkedEmail, linkedTelegram, rawUsername]);
+    return { email, telegram, telegramLinked };
+  }, [linkedEmail, linkedTelegram, rawUsername, telegramLinked]);
   const displayName = user?.full_name || user?.username || authInfo.email || authInfo.telegram || '---';
   const displayUsername =
     rawUsername && rawUsername !== displayName
@@ -76,7 +78,8 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
     }
     const profile = await fetchAuthProfile(token);
     setLinkedEmail(profile?.email || null);
-    setLinkedTelegram(profile?.telegram || profile?.username || null);
+    setLinkedTelegram(profile?.telegram || null);
+    setTelegramLinked(!!profile?.telegramLinked || !!profile?.telegram);
   };
 
   useEffect(() => {
@@ -279,16 +282,14 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
               {displayUsername}
             </div>
             <div className={`profile-page-sub ${subscriptionActive ? '' : 'expired'}`}>
-              <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14">
-                <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
+              <span className="profile-status-dot" />
               <span>{subscriptionActive ? t('profile.subscription_active') : t('profile.subscription_expired')}</span>
             </div>
           </div>
         </div>
         <div className="profile-page-meta">
           <div className="profile-page-uid">
-            ID <span>{uid}</span>
+            ID · <span>{uid}</span>
             <button className="copy-uid-btn" onClick={copyUid} disabled={!uid}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
@@ -347,10 +348,22 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
                 <span className="auth-method-value">{authInfo.telegram}</span>
               </div>
             </div>
+          ) : authInfo.telegramLinked ? (
+            <div className="auth-method-row">
+              <div className="auth-method-icon tg-icon">
+                <svg viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M20.665 3.717l-17.73 6.837c-1.21.486-1.203 1.161-.222 1.462l4.552 1.42 10.532-6.645c.498-.303.953-.14.579.192l-8.533 7.701h-.002l.002.001-.314 4.692c.46 0 .663-.211.921-.46l2.211-2.15 4.599 3.397c.848.467 1.457.227 1.668-.787l3.019-14.228c.309-1.239-.473-1.8-1.282-1.432z" />
+                </svg>
+              </div>
+              <div className="auth-method-info">
+                <span className="auth-method-label">Telegram</span>
+                <span className="auth-method-value muted">{t('profile.telegram_linked')}</span>
+              </div>
+            </div>
           ) : null}
         </div>
 
-        {!authInfo.telegram && (
+        {!authInfo.telegramLinked && !authInfo.telegram && (
           <button type="button" className="tg-link-btn" onClick={openTelegramLinkPopup}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
               <path d="M20.665 3.717l-17.73 6.837c-1.21.486-1.203 1.161-.222 1.462l4.552 1.42 10.532-6.645c.498-.303.953-.14.579.192l-8.533 7.701h-.002l.002.001-.314 4.692c.46 0 .663-.211.921-.46l2.211-2.15 4.599 3.397c.848.467 1.457.227 1.668-.787l3.019-14.228c.309-1.239-.473-1.8-1.282-1.432z" />
