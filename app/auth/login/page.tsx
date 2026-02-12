@@ -77,17 +77,9 @@ export default function LoginPage() {
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const params = new URLSearchParams(window.location.search);
-    const urlMode = params.get('tg');
-    const storedMode = localStorage.getItem('telegram_login_mode');
-    const host = window.location.hostname;
-    const isLocal = host === 'localhost' || host === '127.0.0.1';
-    const mode = (urlMode || storedMode || (isLocal ? 'fallback' : 'widget')).toLowerCase();
-
-    if (urlMode) {
-      localStorage.setItem('telegram_login_mode', mode);
-    }
-
-    setUseTelegramWidget(mode !== 'fallback');
+    const urlMode = params.get('tg')?.toLowerCase();
+    // По умолчанию используем виджет. Фолбек — только если явно указан ?tg=fallback.
+    setUseTelegramWidget(urlMode !== 'fallback');
   }, []);
 
   useEffect(() => {
