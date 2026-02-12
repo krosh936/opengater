@@ -3,24 +3,16 @@ import React, { useEffect, useState } from 'react';
 import './AuthPage.css';
 import {
   authUserById,
-  createAuthUserFromTelegram,
+  AuthTokens,
   extractAuthToken,
   fetchAuthUserId,
   fetchUserInfoByToken,
   sendEmailAuthCode,
   setUserToken,
-  TelegramAuthPayload,
-  verifyTelegramAuth,
   verifyAuthToken,
   verifyEmailAuthCode,
 } from '@/lib/api';
 import { useLanguage } from '@/contexts/LanguageContext';
-
-declare global {
-  interface Window {
-    onTelegramAuth?: (user: TelegramAuthPayload) => void;
-  }
-}
 
 export default function LoginPage() {
   const { t, language } = useLanguage();
@@ -33,8 +25,6 @@ export default function LoginPage() {
   const [step, setStep] = useState<'email' | 'code'>('email');
   const [pendingEmail, setPendingEmail] = useState('');
   const [resendIn, setResendIn] = useState(0);
-  const [telegramBotId, setTelegramBotId] = useState('7831391633');
-  const [telegramBotName, setTelegramBotName] = useState('opengater_vpn_bot');
 
   const authLanguage = language === 'am' ? 'hy' : language;
   const titleText = step === 'code' ? t('auth.email_code_title') : t('auth.welcome_title');
@@ -85,96 +75,6 @@ export default function LoginPage() {
     };
   }, []);
 
-  useEffect(() => {
-    window.onTelegramAuth = async (user) => {
-      try {
-        setError('');
-        const authTokens = await verifyTelegramAuth(user);
-        if (authTokens?.access_token && typeof window !== 'undefined') {
-          localStorage.setItem('auth_access_token', authTokens.access_token);
-          localStorage.setItem('access_token', authTokens.access_token);
-          if (authTokens.refresh_token) {
-            localStorage.setItem('auth_refresh_token', authTokens.refresh_token);
-          }
-          localStorage.setItem('auth_source', 'telegram');
-        }
-
-        if (authTokens?.access_token) {
-          try {
-            await fetchUserInfoByToken(authTokens.access_token);
-            setUserToken(authTokens.access_token);
-            window.location.href = '/';
-            return;
-          } catch {
-            // Если JWT не подходит для основного API — пробуем старый токен.
-          }
-        }
-
-        const token = await createAuthUserFromTelegram(user);
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('auth_source', 'telegram');
-        }
-        setUserToken(token);
-        window.location.href = '/';
-      } catch (e) {
-        setError(t('auth.telegram_error'));
-      }
-    };
-  }, [t]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    const botIdFromUrl = params.get('tg_bot_id') || params.get('tg_bot');
-    if (botIdFromUrl && /^\d+$/.test(botIdFromUrl)) {
-      localStorage.setItem('telegram_login_bot_id', botIdFromUrl);
-    }
-    const storedBotId = localStorage.getItem('telegram_login_bot_id');
-    setTelegramBotId(botIdFromUrl && /^\d+$/.test(botIdFromUrl) ? botIdFromUrl : storedBotId || '7831391633');
-
-    const botNameFromUrl = params.get('tg_bot');
-    if (botNameFromUrl && !/^\d+$/.test(botNameFromUrl)) {
-      localStorage.setItem('telegram_login_bot', botNameFromUrl);
-    }
-    const storedBotName = localStorage.getItem('telegram_login_bot');
-    setTelegramBotName(
-      botNameFromUrl && !/^\d+$/.test(botNameFromUrl) ? botNameFromUrl : storedBotName || 'opengater_vpn_bot'
-    );
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (window.Telegram?.Login) {
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://telegram.org/js/telegram-widget.js?22';
-    script.async = true;
-    document.head.appendChild(script);
-  }, []);
-
-  const handleTelegramLogin = () => {
-    if (typeof window === 'undefined') return;
-    const login = window.Telegram?.Login;
-    const botId = Number(telegramBotId);
-    if (login?.auth && Number.isFinite(botId)) {
-      login.auth({ bot_id: botId, request_access: 'write' }, (user?: TelegramAuthPayload) => {
-        if (user) {
-          window.onTelegramAuth?.(user);
-        }
-      });
-      return;
-    }
-    handleTelegramFallback();
-  };
-
-  const handleTelegramFallback = () => {
-    if (typeof window !== 'undefined') {
-      const bot = telegramBotName.replace(/^@/, '');
-      window.open(`https://t.me/${bot}`, '_blank', 'noopener,noreferrer');
-    }
-  };
-
   const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
   const clearAuthTokens = () => {
@@ -183,6 +83,137 @@ export default function LoginPage() {
     localStorage.removeItem('auth_refresh_token');
     localStorage.removeItem('auth_source');
     localStorage.removeItem('access_token');
+  };
+
+  const saveAuthTokens = (tokens: AuthTokens, source: 'email' | 'telegram') => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem('auth_access_token', tokens.access_token);
+    localStorage.setItem('access_token', tokens.access_token);
+    if (tokens.refresh_token) {
+      localStorage.setItem('auth_refresh_token', tokens.refresh_token);
+    }
+    localStorage.setItem('auth_source', source);
+  };
+
+  const handleAuthTokens = async (tokens: AuthTokens, source: 'email' | 'telegram') => {
+    if (!tokens.access_token) {
+      throw new Error(t('auth.login_error'));
+    }
+    saveAuthTokens(tokens, source);
+
+    try {
+      await fetchUserInfoByToken(tokens.access_token);
+      setUserToken(tokens.access_token);
+      window.location.href = '/';
+      return;
+    } catch {
+      // Если JWT не подходит для основного API — пробуем получить legacy token.
+    }
+
+    let userId: number | null = null;
+    try {
+      const verification = await verifyAuthToken(tokens.access_token);
+      userId = extractUserIdFromRecord(verification);
+    } catch {
+      userId = null;
+    }
+
+    if (!userId) {
+      userId = decodeUserIdFromJwt(tokens.access_token);
+    }
+
+    if (!userId) {
+      userId = await fetchAuthUserId(tokens.access_token);
+    }
+
+    if (!userId) {
+      throw new Error(t('auth.login_error'));
+    }
+
+    const token = await authUserById(userId);
+    setUserToken(token);
+    window.location.href = '/';
+  };
+
+  const openTelegramAuthPopup = () => {
+    if (typeof window === 'undefined') return;
+    setError('');
+
+    const lang = authLanguage || 'ru';
+    const url = new URL('https://lka.bot.eutochkin.com/');
+    url.searchParams.set('lang', lang);
+    url.searchParams.set('theme', 'light');
+
+    const popup = window.open(
+      url.toString(),
+      'opengater_telegram_auth',
+      'width=520,height=720,menubar=no,toolbar=no,location=no,status=no,scrollbars=yes'
+    );
+
+    if (!popup) {
+      setError(t('profile.popup_blocked'));
+      return;
+    }
+
+    const cleanup = (intervalId?: number) => {
+      window.removeEventListener('message', onMessage);
+      if (intervalId) {
+        window.clearInterval(intervalId);
+      }
+    };
+
+    const handleTokensFromHash = async (hash: string) => {
+      const params = new URLSearchParams(hash.replace(/^#/, ''));
+      const accessToken = params.get('access_token') || '';
+      if (!accessToken) return;
+      const refreshToken = params.get('refresh_token') || '';
+      const tokenType = params.get('token_type') || '';
+      await handleAuthTokens(
+        { access_token: accessToken, refresh_token: refreshToken, token_type: tokenType },
+        'telegram'
+      );
+    };
+
+    const onMessage = (event: MessageEvent) => {
+      if (event.origin !== 'https://lka.bot.eutochkin.com') return;
+      if (!event.data || typeof event.data !== 'object') return;
+      const data = event.data as Partial<AuthTokens & { type?: string }>;
+      if (data.type === 'auth_success' && data.access_token) {
+        cleanup(pollTimer);
+        handleAuthTokens(
+          { access_token: data.access_token, refresh_token: data.refresh_token, token_type: data.token_type },
+          'telegram'
+        ).catch((err) => {
+          setError(err instanceof Error ? err.message : t('auth.telegram_error'));
+        });
+        if (!popup.closed) popup.close();
+      }
+    };
+
+    window.addEventListener('message', onMessage);
+
+    const pollTimer = window.setInterval(() => {
+      if (popup.closed) {
+        cleanup(pollTimer);
+        return;
+      }
+      try {
+        const sameOrigin = popup.location.origin === window.location.origin;
+        if (sameOrigin && popup.location.hash) {
+          const hash = popup.location.hash;
+          cleanup(pollTimer);
+          handleTokensFromHash(hash)
+            .catch((err) => {
+              setError(err instanceof Error ? err.message : t('auth.telegram_error'));
+            })
+            .finally(() => {
+              if (!popup.closed) popup.close();
+            });
+        }
+      } catch {
+        // Пока окно на другом домене — доступа нет.
+      }
+    }, 500);
   };
 
   const handleTokenLogin = () => {
@@ -311,13 +342,9 @@ export default function LoginPage() {
         window.location.href = '/';
         return;
       }
-      if (typeof window !== 'undefined' && tokens.access_token) {
+      if (tokens.access_token) {
         // Сохраняем auth-токен для привязки email и повторной авторизации.
-        localStorage.setItem('auth_access_token', tokens.access_token);
-        if (tokens.refresh_token) {
-          localStorage.setItem('auth_refresh_token', tokens.refresh_token);
-        }
-        localStorage.setItem('auth_source', 'email');
+        saveAuthTokens(tokens, 'email');
       }
 
       if (tokens.access_token) {
@@ -485,7 +512,7 @@ export default function LoginPage() {
               <button
                 type="button"
                 className="page-module___8aEwW__btn page-module___8aEwW__btnOutline page-module___8aEwW__telegramBtn"
-                onClick={handleTelegramLogin}
+                onClick={openTelegramAuthPopup}
               >
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M20.665 3.717l-17.73 6.837c-1.21.486-1.203 1.161-.222 1.462l4.552 1.42 10.532-6.645c.498-.303.953-.14.579.192l-8.533 7.701h-.002l.002.001-.314 4.692c.46 0 .663-.211.921-.46l2.211-2.15 4.599 3.397c.848.467 1.457.227 1.668-.787l3.019-14.228c.309-1.239-.473-1.8-1.282-1.432z"></path>
