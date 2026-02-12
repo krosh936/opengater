@@ -1,7 +1,7 @@
 .profile-page {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 18px;
 }
 
 .profile-page * {
@@ -58,10 +58,6 @@
 
 .profile-page .desktop-page-title {
   display: none;
-  font-size: 24px;
-  font-weight: 600;
-  color: var(--text-primary);
-  letter-spacing: -0.3px;
 }
 
 .profile-page .profile-page-card {
@@ -209,7 +205,7 @@
 .profile-page .profile-auth-methods {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 
 .profile-page .auth-methods-card {
@@ -365,7 +361,7 @@
   padding: 12px 14px;
   background: #ffffff;
   border: 1px solid rgba(15, 23, 42, 0.12);
-  border-radius: 16px;
+  border-radius: 999px;
   color: #1a1a1f;
   font-size: 14px;
   font-weight: 500;
@@ -453,16 +449,13 @@
 
 @media (min-width: 768px) {
   .profile-page {
-    max-width: 560px;
+    max-width: none;
+    width: calc(100% + 40px);
+    margin: 0 -20px;
   }
 
   .profile-page .profile-mobile-header {
     display: none;
-  }
-
-  .profile-page .desktop-page-title {
-    display: block;
-    margin-bottom: 12px;
   }
 
   .profile-page .profile-page-card {

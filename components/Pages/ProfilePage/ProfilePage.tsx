@@ -271,8 +271,6 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
         <div className="header-spacer"></div>
       </header>
 
-      <h1 className="desktop-page-title">{t('profile.edit_profile')}</h1>
-
       <div className="profile-page-card">
         <div className="profile-page-header">
           <div className="profile-page-avatar">{initials}</div>
