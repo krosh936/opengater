@@ -75,12 +75,16 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
     if (!token) {
       setLinkedEmail(null);
       setLinkedTelegram(null);
+      setTelegramLinked(false);
       return;
     }
     const profile = await fetchAuthProfile(token);
-    setLinkedEmail(profile?.email || null);
-    setLinkedTelegram(profile?.telegram || null);
-    setTelegramLinked(!!profile?.telegramLinked || !!profile?.telegram);
+    if (!profile) {
+      return;
+    }
+    setLinkedEmail(profile.email || null);
+    setLinkedTelegram(profile.telegram || null);
+    setTelegramLinked(!!profile.telegramLinked || !!profile.telegram);
   };
 
   useEffect(() => {
@@ -116,8 +120,15 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
           return;
         }
         const payload = (data as { user: TelegramAuthPayload }).user;
+        const applyTelegramLink = (user?: TelegramAuthPayload) => {
+          const username = user?.username ? user.username.replace(/^@/, '') : '';
+          const display = username || user?.first_name || '';
+          setTelegramLinked(true);
+          setLinkedTelegram(display || null);
+        };
         linkTelegramToAuth(token, payload)
           .then(() => {
+            applyTelegramLink(payload);
             setToast(t('profile.telegram_linked'));
             refreshUser({ silent: true }).catch(() => {});
             loadAuthProfile().catch(() => {});
@@ -128,6 +139,7 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
           .catch((err: unknown) => {
             const status = (err as { status?: number })?.status;
             if (status === 409) {
+              applyTelegramLink(payload);
               setToast(t('profile.telegram_linked'));
               refreshUser({ silent: true }).catch(() => {});
               loadAuthProfile().catch(() => {});
