@@ -1070,90 +1070,11 @@ export const fetchDeviceTariff = async (userId: number, deviceNumber: number): P
       url: `${API_PROXY_BASE_URL}/user/devices/number/tariff?${query}`,
       init: { method: 'GET', headers, credentials: 'include' },
     },
-    {
-      url: `${API_PROXY_BASE_URL}/devices/number/tariff?${query}`,
-      init: { method: 'GET', headers, credentials: 'include' },
-    },
-    {
-      url: `${API_PROXY_BASE_URL}/user/devices/tariff?${query}`,
-      init: { method: 'GET', headers, credentials: 'include' },
-    },
-    {
-      url: `${API_PROXY_BASE_URL}/devices/tariff?${query}`,
-      init: { method: 'GET', headers, credentials: 'include' },
-    },
-    {
-      url: `${API_PROXY_BASE_URL}/user/devices/number/tariff`,
-      init: {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ device_number: deviceNumber }),
-        credentials: 'include',
-      },
-    },
-    {
-      url: `${API_PROXY_BASE_URL}/user/devices/number/tariff`,
-      init: {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ user_id: userId, device_number: deviceNumber }),
-        credentials: 'include',
-      },
-    },
-    {
-      url: `${API_PROXY_BASE_URL}/user/devices/number/tariff`,
-      init: {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ id: userId, device_number: deviceNumber }),
-        credentials: 'include',
-      },
-    },
-    {
-      url: `${API_PROXY_BASE_URL}/devices/number/tariff`,
-      init: {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ user_id: userId, device_number: deviceNumber }),
-        credentials: 'include',
-      },
-    },
-    {
-      url: `${API_PROXY_BASE_URL}/user/devices/tariff`,
-      init: {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ user_id: userId, device_number: deviceNumber }),
-        credentials: 'include',
-      },
-    },
-    {
-      url: `${API_PROXY_BASE_URL}/devices/tariff`,
-      init: {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ user_id: userId, device_number: deviceNumber }),
-        credentials: 'include',
-      },
-    },
   ];
 
   if (token) {
     attempts.push({
-      url: `${API_PROXY_BASE_URL}/user/devices/number/tariff?token=${encodeURIComponent(token)}`,
-      init: {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ device_number: deviceNumber }),
-        credentials: 'include',
-      },
-    });
-    attempts.push({
       url: `${API_PROXY_BASE_URL}/user/devices/number/tariff?token=${encodeURIComponent(token)}&${query}`,
-      init: { method: 'GET', headers, credentials: 'include' },
-    });
-    attempts.push({
-      url: `${API_PROXY_BASE_URL}/devices/number/tariff?token=${encodeURIComponent(token)}&${query}`,
       init: { method: 'GET', headers, credentials: 'include' },
     });
   }
