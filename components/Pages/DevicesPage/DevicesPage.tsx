@@ -13,7 +13,7 @@ interface DevicesPageProps {
 export default function DevicesPage({ onBack }: DevicesPageProps) {
   const { t, language } = useLanguage();
   const { user, isLoading, error, isAuthenticated, refreshUser } = useUser();
-  const { formatMoneyFrom, currencyRefreshId } = useCurrency();
+  const { formatMoneyFrom, currencyRefreshId, currencies } = useCurrency();
   const [plans, setPlans] = useState<DeviceButtonOption[]>([]);
   const [selectedDeviceNumber, setSelectedDeviceNumber] = useState<number | null>(null);
   const [tariffs, setTariffs] = useState<Record<number, DeviceTariff>>({});
@@ -23,7 +23,19 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
   const [actionsVisible, setActionsVisible] = useState(false);
 
   const baseCurrency = user?.currency || null;
-  const formatCurrency = (value: number) => formatMoneyFrom(Number(value) || 0, baseCurrency);
+  const usdCurrency = useMemo(
+    () => currencies.find((item) => item.code === 'USD') || (baseCurrency?.code === 'USD' ? baseCurrency : null),
+    [currencies, baseCurrency]
+  );
+  const formatTariff = (value: number, deviceNumber?: number | null) => {
+    const amount = Number(value) || 0;
+    if (!amount) return formatMoneyFrom(0, baseCurrency);
+    if (baseCurrency?.code === 'USD') return formatMoneyFrom(amount, baseCurrency);
+    if (usdCurrency && (amount <= 20 || (deviceNumber && Math.round(amount) === deviceNumber))) {
+      return formatMoneyFrom(amount, usdCurrency);
+    }
+    return formatMoneyFrom(amount, baseCurrency);
+  };
   const parsePriceValue = (value: unknown): number | null => {
     if (typeof value === 'number' && Number.isFinite(value)) {
       return value;
@@ -354,7 +366,7 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
           <div className="status-price">
             <div className="price-value">
               {currentUserTariff && Number.isFinite(Number(currentUserTariff.tariff_per_month))
-                ? formatCurrency(currentUserTariff.tariff_per_month)
+                ? formatTariff(currentUserTariff.tariff_per_month, user?.device_number)
                 : '...'}
             </div>
             <div className="price-period">{t('devices.per_month')}</div>
@@ -382,7 +394,7 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
               <div className="plan-number">{plan.device_number}</div>
               <div className="plan-name">{deviceLabel(plan.device_number)}</div>
               <div className="plan-footer">
-                <span className="plan-price">{price != null ? formatCurrency(price) : '...'}</span>
+                <span className="plan-price">{price != null ? formatTariff(price, plan.device_number) : '...'}</span>
                 {showSavings && <span className="plan-savings">{t('devices.savings_28')}</span>}
               </div>
             </div>
@@ -411,13 +423,13 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
         </div>
         <div className="pricing-row" style={{ display: discountPercent ? 'flex' : 'none' }}>
           <span className="pricing-label">{t('devices.discount_28')}</span>
-          <span className="pricing-value pricing-savings">-{formatCurrency(discountValue)}</span>
+          <span className="pricing-value pricing-savings">-{formatTariff(discountValue)}</span>
         </div>
         <div className="pricing-row">
           <span className="pricing-label pricing-total-label">{t('devices.total_monthly')}</span>
           <span className="pricing-value pricing-total">
             {selectedTariff && Number.isFinite(Number(selectedTariff.tariff_per_month))
-              ? formatCurrency(selectedTariff.tariff_per_month)
+              ? formatTariff(selectedTariff.tariff_per_month, selectedDeviceNumber)
               : '...'}
           </span>
         </div>
