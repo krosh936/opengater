@@ -13,7 +13,7 @@ interface DevicesPageProps {
 export default function DevicesPage({ onBack }: DevicesPageProps) {
   const { t, language } = useLanguage();
   const { user, isLoading, error, isAuthenticated, refreshUser } = useUser();
-  const { formatCurrency: formatPrice, currencyRefreshId } = useCurrency();
+  const { formatMoneyFrom, currencyRefreshId } = useCurrency();
   const [plans, setPlans] = useState<DeviceButtonOption[]>([]);
   const [selectedDeviceNumber, setSelectedDeviceNumber] = useState<number | null>(null);
   const [tariffs, setTariffs] = useState<Record<number, DeviceTariff>>({});
@@ -22,7 +22,8 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
   const [summaryVisible, setSummaryVisible] = useState(false);
   const [actionsVisible, setActionsVisible] = useState(false);
 
-  const formatCurrency = (value: number) => formatPrice(Number(value) || 0);
+  const baseCurrency = user?.currency || null;
+  const formatCurrency = (value: number) => formatMoneyFrom(Number(value) || 0, baseCurrency);
   const parsePriceValue = (value: unknown): number | null => {
     if (typeof value === 'number' && Number.isFinite(value)) {
       return value;
