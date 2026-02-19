@@ -24,7 +24,7 @@ const detectTelegram = () => {
 export default function InvitePage({ onBack }: InvitePageProps) {
   const { t } = useLanguage();
   const { user, isLoading, error, isAuthenticated } = useUser();
-  const { formatCurrency, currencyRefreshId } = useCurrency();
+  const { formatCurrency, currencyRefreshId, convertAmount, currency } = useCurrency();
   const [referredUsers, setReferredUsers] = useState<ReferredUser[]>([]);
   const [isLoadingReferrals, setIsLoadingReferrals] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
@@ -70,12 +70,16 @@ export default function InvitePage({ onBack }: InvitePageProps) {
 
   const referralLink = user?.bot_referral_link || user?.web_referral_link || '';
 
-  const formatPrice = (price: number) => formatCurrency(price, { showCode: true, showSymbol: false });
-  const displayPrice = (amount: number) => formatCurrency(amount, { showCode: true, showSymbol: false });
+  const baseCurrency = user?.currency || null;
+  const toDisplayCurrency = (value: number) =>
+    formatCurrency(convertAmount(value, baseCurrency, currency.code), { showCode: true, showSymbol: false });
+  const formatPrice = (price: number) => toDisplayCurrency(price);
+  const displayPrice = (amount: number) => toDisplayCurrency(amount);
 
   const invitedCount = referredUsers.length;
   const connectedCount = referredUsers.filter((u) => u.connected === true).length;
   const totalEarned = referredUsers.reduce((sum, u) => sum + Number(u.amount || 0), 0);
+  const totalEarnedDisplay = displayPrice(totalEarned);
   const progressPercent = invitedCount > 0 ? (connectedCount / invitedCount) * 100 : 0;
 
   const heroSubtitle = t('referral.hero_subtitle', { amount: formatPrice(50) });
@@ -200,7 +204,7 @@ export default function InvitePage({ onBack }: InvitePageProps) {
       <div className="earnings-block">
         <div className="earnings-header">{t('referral.total_earned')}</div>
         <div className="earnings-amount">
-          {isLoadingReferrals ? '...' : displayPrice(totalEarned)}
+          {isLoadingReferrals ? '...' : totalEarnedDisplay}
         </div>
         <div className="progress-bar">
           <div className="progress-fill" style={{ width: `${progressPercent}%` }}></div>
