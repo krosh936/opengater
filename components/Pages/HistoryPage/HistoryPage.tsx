@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import './HistoryPage.css';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useUser } from '@/contexts/UserContext';
+import { useCurrency } from '@/contexts/CurrencyContext';
 import { fetchPaymentsHistory, PaymentHistoryItem } from '@/lib/api';
 
 type PaymentGroup = {
@@ -60,6 +61,7 @@ const formatDateLabel = (date: Date, language: string, t: (key: string, options?
 export default function HistoryPage() {
   const { t, language } = useLanguage();
   const { user, isLoading, error, isAuthenticated } = useUser();
+  const { currency, currencies, convertAmount, formatNumber } = useCurrency();
   const [query, setQuery] = useState('');
   const [payments, setPayments] = useState<PaymentHistoryItem[]>([]);
   const [isPaymentsLoading, setIsPaymentsLoading] = useState(true);
@@ -93,16 +95,22 @@ export default function HistoryPage() {
     const search = query.trim().toLowerCase();
     if (!search) return payments;
     return payments.filter((payment) => {
-      const currency = payment.currency || '';
+      const paymentCurrency = payment.currency || '';
       const date = parseDateSafe(payment.created_at);
       const dateText = date ? formatDateTime(date, language) : '';
-      const amount = payment.amount != null ? Math.abs(payment.amount).toString() : '';
+      const amountValue = payment.amount != null ? Math.abs(payment.amount) : 0;
+      const fromCurrency =
+        currencies.find((item) => item.code === (paymentCurrency || user?.currency?.code)) ||
+        user?.currency ||
+        null;
+      const converted = convertAmount(amountValue, fromCurrency, currency.code);
+      const amount = formatNumber(converted);
       const title = payment.title || '';
       const subtitle = payment.subtitle || '';
-      const haystack = `${title} ${subtitle} ${amount} ${currency} ${dateText}`.toLowerCase();
+      const haystack = `${title} ${subtitle} ${amount} ${paymentCurrency} ${dateText}`.toLowerCase();
       return haystack.includes(search);
     });
-  }, [payments, query, language]);
+  }, [payments, query, language, currencies, currency.code, convertAmount, formatNumber, user?.currency]);
 
   const groupedPayments = useMemo<PaymentGroup[]>(() => {
     const groups = new Map<string, PaymentGroup>();
@@ -194,7 +202,12 @@ export default function HistoryPage() {
               <div className="date-header">{group.label}</div>
               {group.items.map((payment) => {
                 const amountValue = payment.amount ?? 0;
-                const amountLabel = `${amountValue >= 0 ? '+' : '-'}${Math.abs(amountValue)} ${payment.currency || ''}`.trim();
+                const fromCurrency =
+                  currencies.find((item) => item.code === (payment.currency || user?.currency?.code)) ||
+                  user?.currency ||
+                  null;
+                const converted = convertAmount(Math.abs(amountValue), fromCurrency, currency.code);
+                const amountLabel = `${amountValue >= 0 ? '+' : '-'}${formatNumber(converted)} ${currency.code}`.trim();
                 const date = parseDateSafe(payment.created_at);
                 return (
                   <div key={payment.id ?? `${payment.title}-${payment.created_at}-${amountLabel}`} className="payment-item">
