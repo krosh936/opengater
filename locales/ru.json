@@ -32,6 +32,7 @@
   "payment.calc_bonus": "Бонус",
   "payment.calc_total": "Итого к зачислению",
   "payment.minimum_note": "Минимум {amount} {currency} • Моментальное зачисление",
+  "payment.min_error": "Минимальная сумма — {amount} {currency}",
   "payment.details_title": "Детали платежа:",
   "payment.details_name": "Пополнение баланса Opengater",
   "payment.method_title": "Способ оплаты",

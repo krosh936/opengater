@@ -237,6 +237,12 @@ export interface PaymentHistoryItem {
   [key: string]: unknown;
 }
 
+export interface PaymentTariff {
+  name?: string;
+  amount: number;
+  bonus: number;
+}
+
 export interface ReferredUser {
   full_name?: string;
   username?: string;
@@ -561,6 +567,42 @@ export const fetchPaymentBonus = async (
     }
   }
   return 0;
+};
+
+export const fetchPaymentTariffs = async (): Promise<PaymentTariff[]> => {
+  const token = getUserToken();
+  const headers = buildJsonHeaders(token);
+  const basePath = `${API_PROXY_BASE_URL}/user/payments/tariff`;
+  const attempts: Array<{ url: string; init: RequestInit }> = [
+    {
+      url: basePath,
+      init: { method: 'GET', headers, credentials: 'include' },
+    },
+  ];
+
+  if (token) {
+    attempts.push({
+      url: `${basePath}?token=${encodeURIComponent(token)}`,
+      init: { method: 'GET', headers, credentials: 'include' },
+    });
+  }
+
+  const data = await fetchJsonWithFallbacks<unknown>(attempts);
+  if (!Array.isArray(data)) return [];
+  return data
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const record = item as Record<string, unknown>;
+      const amount = typeof record.amount === 'number' ? record.amount : Number(record.amount);
+      const bonus = typeof record.bonus === 'number' ? record.bonus : Number(record.bonus || 0);
+      if (!Number.isFinite(amount)) return null;
+      return {
+        name: typeof record.name === 'string' ? record.name : undefined,
+        amount,
+        bonus: Number.isFinite(bonus) ? bonus : 0,
+      } satisfies PaymentTariff;
+    })
+    .filter((item): item is PaymentTariff => !!item);
 };
 
 // Функция для получения дней оставшихся

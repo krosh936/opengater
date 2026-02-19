@@ -257,6 +257,12 @@
   border-radius: 20px;
   padding: 16px 18px;
   border: 1px solid rgba(255, 255, 255, 0.08);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.payment-input-field.error {
+  border-color: rgba(255, 59, 48, 0.7);
+  box-shadow: 0 0 0 1px rgba(255, 59, 48, 0.2);
 }
 
 .payment-input-field input {
@@ -271,6 +277,12 @@
 .payment-input-currency {
   font-size: 19px;
   color: var(--text-secondary);
+}
+
+.payment-input-error {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #ff3b30;
 }
 
 .payment-calc-title {
@@ -432,6 +444,12 @@
 [data-theme="light"] .payment-input-field {
   background: rgba(0, 0, 0, 0.05);
   border-color: rgba(0, 0, 0, 0.08);
+}
+
+.light-theme .payment-input-field.error,
+[data-theme="light"] .payment-input-field.error {
+  border-color: rgba(255, 59, 48, 0.6);
+  box-shadow: 0 0 0 1px rgba(255, 59, 48, 0.15);
 }
 
 .light-theme .payment-cta,

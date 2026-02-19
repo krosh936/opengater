@@ -4,7 +4,7 @@ import './PaymentPage.css';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useCurrency } from '@/contexts/CurrencyContext';
 import { useUser } from '@/contexts/UserContext';
-import { fetchPaymentBonus } from '@/lib/api';
+import { fetchPaymentBonus, fetchPaymentTariffs } from '@/lib/api';
 
 interface PaymentPageProps {
   onBack?: () => void;
@@ -33,6 +33,7 @@ export default function PaymentPage({ onBack }: PaymentPageProps) {
   const [selectedMethod, setSelectedMethod] = useState<'rub' | 'crypto'>('rub');
   const [selectedPreset, setSelectedPreset] = useState<AmountPreset | null>(AMOUNT_PRESETS[0]);
   const [amountInput, setAmountInput] = useState<string>(String(AMOUNT_PRESETS[0].amount));
+  const [amountPresets, setAmountPresets] = useState<AmountPreset[]>(AMOUNT_PRESETS);
   const [bonusValue, setBonusValue] = useState<number>(AMOUNT_PRESETS[0].bonus);
   const [isBonusLoading, setIsBonusLoading] = useState(false);
 
@@ -78,6 +79,46 @@ export default function PaymentPage({ onBack }: PaymentPageProps) {
   }, [isRubCurrency, isUsdLike]);
 
   useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const tariffs = await fetchPaymentTariffs();
+        if (!active || tariffs.length === 0) return;
+        const mapped = tariffs
+          .map((tariff) => ({
+            amount: Number(tariff.amount),
+            bonus: Number(tariff.bonus || 0),
+          }))
+          .filter((preset) => Number.isFinite(preset.amount) && preset.amount > 0)
+          .sort((a, b) => a.amount - b.amount);
+
+        if (!mapped.length) return;
+
+        setAmountPresets(mapped);
+        const currentAmount = Number(amountInput || 0);
+        const matched = mapped.find((preset) => preset.amount === currentAmount) || null;
+        if (selectedPreset) {
+          if (matched) {
+            setSelectedPreset(matched);
+          } else {
+            setSelectedPreset(mapped[0]);
+            setAmountInput(String(mapped[0].amount));
+          }
+        } else {
+          setSelectedPreset(matched);
+        }
+      } catch {
+        // Используем дефолтные пресеты при ошибке.
+      }
+    };
+
+    load();
+    return () => {
+      active = false;
+    };
+  }, [currency.code, amountInput, selectedPreset]);
+
+  useEffect(() => {
     setBonusValue(fallbackBonus);
   }, [fallbackBonus]);
 
@@ -113,6 +154,15 @@ export default function PaymentPage({ onBack }: PaymentPageProps) {
       window.clearTimeout(timeout);
     };
   }, [amountValue, currency.code, fallbackBonus]);
+
+  const minimumAmount = useMemo(() => {
+    const values = amountPresets.map((preset) => preset.amount).filter((amount) => Number.isFinite(amount) && amount > 0);
+    return values.length ? Math.min(...values) : 50;
+  }, [amountPresets]);
+
+  const hasInput = amountInput.trim().length > 0;
+  const isBelowMinimum = hasInput && amountValue > 0 && amountValue < minimumAmount;
+  const canPay = amountValue >= minimumAmount;
 
   const handleMethodSelect = (methodId: 'rub' | 'crypto') => {
     setSelectedMethod(methodId);
@@ -240,7 +290,7 @@ export default function PaymentPage({ onBack }: PaymentPageProps) {
           <p className="payment-step-subtitle">{t('payment.step_amount_subtitle')}</p>
 
           <div className="payment-amounts">
-            {AMOUNT_PRESETS.map((preset, index) => (
+            {amountPresets.map((preset, index) => (
               <button
                 key={preset.amount}
                 type="button"
@@ -258,7 +308,7 @@ export default function PaymentPage({ onBack }: PaymentPageProps) {
 
           <div className="payment-input-card">
             <div className="payment-input-label">{t('payment.input_label')}</div>
-            <div className="payment-input-field">
+            <div className={`payment-input-field ${isBelowMinimum ? 'error' : ''}`}>
               <span className="payment-input-currency">{currency.symbol || currency.code}</span>
               <input
                 type="text"
@@ -268,6 +318,11 @@ export default function PaymentPage({ onBack }: PaymentPageProps) {
                 placeholder="0"
               />
             </div>
+            {isBelowMinimum ? (
+              <div className="payment-input-error">
+                {t('payment.min_error', { amount: formatNumber(minimumAmount), currency: currency.code })}
+              </div>
+            ) : null}
           </div>
 
           <div className="payment-calc-card">
@@ -291,14 +346,16 @@ export default function PaymentPage({ onBack }: PaymentPageProps) {
           <button
             type="button"
             className="payment-cta"
-            disabled={amountValue <= 0}
+            disabled={!canPay}
             onClick={handlePay}
           >
             {t('payment.pay_button')}
             <span className="payment-cta-arrow">›</span>
           </button>
 
-          <div className="payment-step-note">{t('payment.minimum_note', { amount: 50, currency: currency.code })}</div>
+          <div className="payment-step-note">
+            {t('payment.minimum_note', { amount: formatNumber(minimumAmount), currency: currency.code })}
+          </div>
         </div>
       )}
 
