@@ -7,7 +7,6 @@ import ProfileAvatar from './ProfileAvatar';
 import { useUser } from '@/contexts/UserContext';
 import ProfileSlideMenu from './ProfileSlideMenu';
 import { useTheme } from '@/contexts/ThemeContext';
-import { AuthUserProfile, fetchAuthProfile } from '@/lib/api';
 
 const Header: React.FC = () => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -16,12 +15,14 @@ const Header: React.FC = () => {
   const [isAtTop, setIsAtTop] = useState(true);
   const { user, isLoading } = useUser();
   const { toggleTheme } = useTheme();
-  const [authProfile, setAuthProfile] = useState<AuthUserProfile | null>(null);
-  const [authLoaded, setAuthLoaded] = useState(false);
-  
-  const name = user?.full_name || user?.username || authProfile?.email || authProfile?.telegram || (isLoading || !authLoaded ? '' : 'Гость');
-  const email = authProfile?.email || user?.username || '';
-  const uid = user?.id ? String(user.id) : authProfile?.id ? String(authProfile.id) : '';
+  const [authLabelFallback, setAuthLabelFallback] = useState('');
+
+  const normalizedFallback = authLabelFallback.trim();
+  const userEmail = user?.email || (user?.username?.includes('@') ? user.username : '');
+  const fallbackEmail = normalizedFallback.includes('@') ? normalizedFallback : '';
+  const name = user?.full_name || userEmail || user?.username || normalizedFallback || (isLoading ? '' : 'Гость');
+  const email = userEmail || fallbackEmail;
+  const uid = user?.id ? String(user.id) : '';
   const subscriptionActive = !!user && new Date(user.expire).getTime() > Date.now();
   const userData = {
     name,
@@ -59,29 +60,16 @@ const Header: React.FC = () => {
     setIsMobileMenuOpen(false);
   };
   
-  // Р—Р°РєСЂС‹С‚РёРµ dropdown РїСЂРё РєР»РёРєРµ РІРЅРµ РµРіРѕ
   useEffect(() => {
-    const loadAuthProfile = async () => {
-      if (typeof window === 'undefined') return;
-      const token = localStorage.getItem('auth_access_token');
-      if (!token) {
-        setAuthProfile(null);
-        setAuthLoaded(true);
-        return;
-      }
-      const profile = await fetchAuthProfile(token);
-      setAuthProfile(profile);
-      setAuthLoaded(true);
-    };
-
-    loadAuthProfile().catch(() => setAuthLoaded(true));
-    const handleFocus = () => {
-      loadAuthProfile().catch(() => {});
-    };
-    window.addEventListener('focus', handleFocus);
-    return () => window.removeEventListener('focus', handleFocus);
+    if (typeof window === 'undefined') return;
+    const fallback =
+      localStorage.getItem('ga_user_email') ||
+      localStorage.getItem('auth_user_label') ||
+      '';
+    setAuthLabelFallback(fallback);
   }, [user?.id]);
 
+  // Р—Р°РєСЂС‹С‚РёРµ dropdown РїСЂРё РєР»РёРєРµ РІРЅРµ РµРіРѕ
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {

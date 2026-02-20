@@ -32,12 +32,31 @@ const DEFAULT_CURRENCIES: Currency[] = [
 const findCurrency = (list: Currency[], code?: string | null) =>
   list.find((item) => item.code === code);
 
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const mergeCurrencies = (data: Currency[]) => {
   // Совмещаем данные API с дефолтами, чтобы UI работал даже при неполном ответе.
   const map = new Map(DEFAULT_CURRENCIES.map((item) => [item.code, item]));
   data.forEach((item) => {
     const existing = map.get(item.code);
-    map.set(item.code, existing ? { ...existing, ...item } : item);
+    if (!existing) {
+      map.set(item.code, {
+        ...item,
+        rate: Number.isFinite(Number(item.rate)) ? Number(item.rate) : 1,
+        rounding_precision:
+          Number.isFinite(Number(item.rounding_precision)) ? Number(item.rounding_precision) : 2,
+      });
+      return;
+    }
+    map.set(item.code, {
+      ...existing,
+      ...item,
+      rate: Number.isFinite(Number(item.rate)) ? Number(item.rate) : existing.rate,
+      rounding_precision:
+        Number.isFinite(Number(item.rounding_precision))
+          ? Number(item.rounding_precision)
+          : existing.rounding_precision,
+    });
   });
   return Array.from(map.values());
 };
@@ -189,34 +208,48 @@ export const CurrencyProvider = ({ children }: { children: ReactNode }) => {
     if (code === selectedCode && user?.currency?.code === code) return;
     const nextCurrency = findCurrency(currencies, code);
     const nextCurrencyId = nextCurrency?.id ?? null;
+    const fallbackCode = user?.currency?.code || selectedCode;
     if (typeof window !== 'undefined') {
       localStorage.setItem(STORAGE_KEY, code);
       localStorage.setItem(PENDING_KEY, code);
       localStorage.setItem(PENDING_TS_KEY, String(Date.now()));
     }
     setSelectedCode(code);
+
     if (!user?.id) {
-      // Если пользователя ещё нет: сохраняем локально и перезагружаем страницу,
-      // чтобы все страницы перечитали валюту.
       setCurrencyRefreshId((prev) => prev + 1);
-      if (typeof window !== 'undefined') {
-        window.location.reload();
-      }
       return;
     }
-    let shouldReload = false;
-    try {
-      // Сохраняем выбор на бэкенде, чтобы все эндпоинты вернули значения в новой валюте.
-      await setUserCurrency(user.id, code, nextCurrencyId);
-      shouldReload = true;
-    } catch {
-      // keep local selection even if API update fails
-    } finally {
-      setCurrencyRefreshId((prev) => prev + 1);
-      if (shouldReload && typeof window !== 'undefined') {
-        window.location.reload();
+
+    let updated = false;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        await setUserCurrency(user.id, code, nextCurrencyId);
+        updated = true;
+        break;
+      } catch {
+        if (attempt < 2) {
+          await wait(250);
+        }
       }
     }
+
+    if (updated) {
+      try {
+        await refreshUser({ silent: true });
+      } catch {
+        // ignore and rely on background sync/pending keys
+      }
+    } else {
+      setSelectedCode(fallbackCode);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(STORAGE_KEY, fallbackCode);
+        localStorage.removeItem(PENDING_KEY);
+        localStorage.removeItem(PENDING_TS_KEY);
+      }
+    }
+
+    setCurrencyRefreshId((prev) => prev + 1);
   };
 
   return (

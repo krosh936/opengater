@@ -60,7 +60,6 @@ const ProfileDropdown: React.FC<ProfileDropdownProps> = ({
     usernameRaw && usernameRaw !== displayName
       ? (usernameRaw.includes('@') ? usernameRaw : `@${usernameRaw}`)
       : '';
-  const displayUid = userData.uid || '-----';
   const currentCurrency = currency.code;
   
   // РЎРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ СЃ isOpen
@@ -97,24 +96,6 @@ const ProfileDropdown: React.FC<ProfileDropdownProps> = ({
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
       handleProfileCardClick();
-    }
-  };
-  
-  const copyUid = async () => {
-    if (!userData.uid) return;
-    try {
-      if (navigator.clipboard) {
-        await navigator.clipboard.writeText(userData.uid);
-        return;
-      }
-      throw new Error('Clipboard unavailable');
-    } catch {
-      const textArea = document.createElement('textarea');
-      textArea.value = userData.uid;
-      document.body.appendChild(textArea);
-      textArea.select();
-      document.execCommand('copy');
-      document.body.removeChild(textArea);
     }
   };
   
@@ -202,22 +183,6 @@ const ProfileDropdown: React.FC<ProfileDropdownProps> = ({
           <svg className="profile-card-arrow" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <polyline points="9 18 15 12 9 6"></polyline>
           </svg>
-        </div>
-        <div className="profile-meta">
-          <div className="profile-uid">
-            ID: <span id="dropdownUid">{displayUid}</span>
-            <button
-              className="copy-uid-btn"
-              onClick={copyUid}
-              disabled={!userData.uid}
-              title="РЎРєРѕРїРёСЂРѕРІР°С‚СЊ ID"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-              </svg>
-            </button>
-          </div>
         </div>
       </div>
 

@@ -77,10 +77,11 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
   }, [toast]);
 
   const rawUsername = user?.username || '';
+  const rawEmail = user?.email || '';
   const hasTelegramLikeUsername = !!rawUsername && !rawUsername.includes('@');
   const inferredTelegram = hasTelegramLikeUsername ? formatTelegramDisplay(rawUsername) : '';
   const authInfo = useMemo(() => {
-    const email = linkedEmail || (rawUsername.includes('@') ? rawUsername : '');
+    const email = linkedEmail || rawEmail || (rawUsername.includes('@') ? rawUsername : '');
     const telegramSource =
       linkedTelegram ||
       (telegramLinked && rawUsername && !rawUsername.includes('@') ? rawUsername : '') ||
@@ -88,8 +89,8 @@ export default function ProfilePage({ onBack }: ProfilePageProps) {
     const telegram = telegramSource ? formatTelegramDisplay(telegramSource) : '';
     const resolvedTelegramLinked = telegramLinked || !!telegram || hasTelegramLikeUsername;
     return { email, telegram, telegramLinked: resolvedTelegramLinked };
-  }, [linkedEmail, linkedTelegram, rawUsername, telegramLinked, inferredTelegram, hasTelegramLikeUsername]);
-  const displayName = user?.full_name || user?.username || authInfo.email || authInfo.telegram || '---';
+  }, [linkedEmail, linkedTelegram, rawEmail, rawUsername, telegramLinked, inferredTelegram, hasTelegramLikeUsername]);
+  const displayName = user?.full_name || authInfo.email || user?.username || authInfo.telegram || '---';
   const displayUsername =
     rawUsername && rawUsername !== displayName
       ? (rawUsername.includes('@') ? rawUsername : `@${rawUsername.replace(/^@/, '')}`)

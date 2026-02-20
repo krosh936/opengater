@@ -174,6 +174,7 @@ export interface Account {
 
 export interface UserInfo {
   id: number;
+  email?: string | null;
   full_name: string;
   username: string;
   language: string;
@@ -282,24 +283,25 @@ const fetchJsonWithFallbacks = async <T>(attempts: Array<{ url: string; init: Re
   let lastError: Error | null = null;
   for (const attempt of attempts) {
     try {
-      const response = await fetch(attempt.url, attempt.init);
+      const init: RequestInit = {
+        ...attempt.init,
+        cache: attempt.init.cache ?? 'no-store',
+      };
+      const response = await fetch(attempt.url, init);
       if (!response.ok) {
-        lastError = new Error(`Ошибка сервера: ${response.status}`);
+        lastError = new Error('Server error: ' + response.status);
         continue;
       }
       return response.json();
     } catch (error) {
-      lastError = error instanceof Error ? error : new Error('Ошибка сети');
+      lastError = error instanceof Error ? error : new Error('Network error');
     }
   }
   if (lastError) {
     throw lastError;
   }
-  throw new Error('Не удалось получить данные');
+  throw new Error('Failed to load data');
 };
-
-
-// Функция для получения user_token из localStorage или cookies
 export const getUserToken = (): string | null => {
   if (typeof window !== 'undefined') {
     const storedToken =
@@ -328,6 +330,10 @@ export const removeUserToken = (): void => {
   if (typeof window !== 'undefined') {
     localStorage.removeItem('user_token');
     localStorage.removeItem('auth_token');
+    localStorage.removeItem('auth_access_token');
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('auth_refresh_token');
+    localStorage.removeItem('ga_refresh_token');
     localStorage.removeItem('user_id');
   }
 };
@@ -773,7 +779,6 @@ export const setUserCurrency = async (
   currencyId?: number | null
 ): Promise<string> => {
   const token = getUserToken();
-  const headers = buildJsonHeaders(token);
   const extraToken =
     typeof window !== 'undefined'
       ? localStorage.getItem('auth_access_token') || localStorage.getItem('access_token')
@@ -968,7 +973,11 @@ export const fetchDeviceButtons = async (userId: number): Promise<DeviceButtonOp
       init: { method: 'GET', headers, credentials: 'include' },
     },
     {
-      url: `${API_PROXY_BASE_URL}/devices/number/buttons`,
+      url: `${API_PROXY_BASE_URL}/user/devices/number/buttons/`,
+      init: { method: 'GET', headers, credentials: 'include' },
+    },
+    {
+      url: `${API_PROXY_BASE_URL}/user/devices/number/buttons?user_id=${encodeURIComponent(userId)}`,
       init: { method: 'GET', headers, credentials: 'include' },
     },
   ];
@@ -978,37 +987,11 @@ export const fetchDeviceButtons = async (userId: number): Promise<DeviceButtonOp
       url: `${API_PROXY_BASE_URL}/user/devices/number/buttons?token=${encodeURIComponent(token)}`,
       init: { method: 'GET', headers, credentials: 'include' },
     });
+    attempts.push({
+      url: `${API_PROXY_BASE_URL}/user/devices/number/buttons/?token=${encodeURIComponent(token)}`,
+      init: { method: 'GET', headers, credentials: 'include' },
+    });
   }
-
-  attempts.push(
-    {
-      url: `${API_PROXY_BASE_URL}/user/devices/number/buttons`,
-      init: {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ user_id: userId }),
-        credentials: 'include',
-      },
-    },
-    {
-      url: `${API_PROXY_BASE_URL}/user/devices/number/buttons`,
-      init: {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ id: userId }),
-        credentials: 'include',
-      },
-    },
-    {
-      url: `${API_PROXY_BASE_URL}/devices/number/buttons`,
-      init: {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ user_id: userId }),
-        credentials: 'include',
-      },
-    }
-  );
 
   return fetchJsonWithFallbacks<DeviceButtonOption[]>(attempts);
 };

@@ -10,10 +10,134 @@ interface DevicesPageProps {
   onBack?: () => void;
 }
 
+const FALLBACK_PLAN_NUMBERS = [2, 3, 5, 10];
+
+const parsePriceValue = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (!text) return null;
+
+    const withSuffix = text.match(/(-?\d+(?:[.,]\d+)?)\s*(RUB|USD|AMD|₽|\$|֏)/i);
+    if (withSuffix?.[1]) {
+      const parsed = Number(withSuffix[1].replace(',', '.'));
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    const withPrefix = text.match(/(?:RUB|USD|AMD|₽|\$|֏)\s*(-?\d+(?:[.,]\d+)?)/i);
+    if (withPrefix?.[1]) {
+      const parsed = Number(withPrefix[1].replace(',', '.'));
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+
+    if (/[A-Za-zА-Яа-я\u0530-\u058F]/.test(text)) {
+      return null;
+    }
+
+    const matches = Array.from(text.matchAll(/-?\d+(?:[.,]\d+)?/g));
+    if (!matches.length) return null;
+    const parsedValues = matches
+      .map((item) => Number(item[0].replace(',', '.')))
+      .filter((num) => Number.isFinite(num));
+    if (!parsedValues.length) return null;
+    if (parsedValues.length === 1) return parsedValues[0];
+    return parsedValues.reduce((best, current) =>
+      Math.abs(current) > Math.abs(best) ? current : best
+    );
+  }
+  return null;
+};
+
+const sanitizeDeviceInput = (value: string) => value.replace(/[^\d]/g, '');
+
+const parsePriceFromButtonText = (text?: string | null): number | null => {
+  if (!text) return null;
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!normalized) return null;
+
+  const suffixCode = normalized.match(/(-?\d+(?:[.,]\d+)?)\s*(RUB|USD|AMD|TG_STARS)\b/i);
+  if (suffixCode?.[1]) {
+    const parsed = Number(suffixCode[1].replace(',', '.'));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  const prefixCode = normalized.match(/\b(RUB|USD|AMD|TG_STARS)\s*(-?\d+(?:[.,]\d+)?)/i);
+  if (prefixCode?.[2]) {
+    const parsed = Number(prefixCode[2].replace(',', '.'));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  const suffixSymbol = normalized.match(/(-?\d+(?:[.,]\d+)?)\s*([₽$֏])/);
+  if (suffixSymbol?.[1]) {
+    const parsed = Number(suffixSymbol[1].replace(',', '.'));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  const prefixSymbol = normalized.match(/([₽$֏])\s*(-?\d+(?:[.,]\d+)?)/);
+  if (prefixSymbol?.[2]) {
+    const parsed = Number(prefixSymbol[2].replace(',', '.'));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+};
+
+const normalizeTariffResponse = (data: DeviceTariffResponse | unknown, deviceNumber: number): DeviceTariff | null => {
+  if (Array.isArray(data)) {
+    const match = data.find((item) => {
+      if (!item || typeof item !== 'object') return false;
+      const record = item as Record<string, unknown>;
+      const num = parsePriceValue(record.device_number ?? record.deviceNumber);
+      return num === deviceNumber;
+    });
+    if (match) {
+      return normalizeTariffResponse(match, deviceNumber);
+    }
+  }
+  if (typeof data === 'number') {
+    return {
+      device_number: deviceNumber,
+      tariff_per_day: 0,
+      tariff_per_month: data,
+    };
+  }
+  if (data && typeof data === 'object') {
+    const record = data as Record<string, unknown>;
+    const monthlyRaw =
+      parsePriceValue(record.tariff_per_month) ??
+      parsePriceValue(record.tariff) ??
+      parsePriceValue(record.price) ??
+      parsePriceValue(record.monthly) ??
+      parsePriceValue(record.monthly_price);
+    const dailyRaw = parsePriceValue(record.tariff_per_day);
+    const daily = dailyRaw != null && Number.isFinite(dailyRaw) && dailyRaw > 0 ? dailyRaw : 0;
+    const derivedMonthly = daily > 0 ? daily * 30 : null;
+    let monthly = monthlyRaw;
+    if (monthly == null && derivedMonthly != null) {
+      monthly = derivedMonthly;
+    }
+    if (monthly != null && derivedMonthly != null && monthly < derivedMonthly * 0.45) {
+      // Protect against malformed payloads where monthly is parsed as device count.
+      monthly = derivedMonthly;
+    }
+    if (monthly == null) {
+      return null;
+    }
+    return {
+      device_number: Number(record.device_number ?? deviceNumber) || deviceNumber,
+      tariff_per_day: Number.isFinite(daily) ? daily : 0,
+      tariff_per_month: monthly,
+    };
+  }
+  return null;
+};
+
 export default function DevicesPage({ onBack }: DevicesPageProps) {
   const { t, language } = useLanguage();
   const { user, isLoading, error, isAuthenticated, refreshUser } = useUser();
-  const { formatMoneyFrom, currencyRefreshId, currencies, currency, convertAmount } = useCurrency();
+  const { formatCurrency, currencyRefreshId } = useCurrency();
   const [plans, setPlans] = useState<DeviceButtonOption[]>([]);
   const [selectedDeviceNumber, setSelectedDeviceNumber] = useState<number | null>(null);
   const [tariffs, setTariffs] = useState<Record<number, DeviceTariff>>({});
@@ -21,180 +145,57 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
   const [isUpdating, setIsUpdating] = useState(false);
   const [summaryVisible, setSummaryVisible] = useState(false);
   const [actionsVisible, setActionsVisible] = useState(false);
-  const [debugEnabled, setDebugEnabled] = useState(false);
-  const [rawButtons, setRawButtons] = useState<unknown>(null);
-  const [rawTariffs, setRawTariffs] = useState<Record<number, unknown>>({});
-  const [debugCurrencyInfo, setDebugCurrencyInfo] = useState<Record<string, string | null>>({});
-
-  const baseCurrency = user?.currency || null;
-  const rubCurrency = useMemo(() => {
-    const rub = currencies.find((item) => item.code === 'RUB');
-    if (rub) return rub;
-    return {
-      code: 'RUB',
-      symbol: '\u20BD',
-      rate: 1,
-      rounding_precision: 0,
-      id: 1,
-      hidden: false,
-    } as const;
-  }, [currencies]);
-
-  const extractButtonPrice = (text?: string | null): { value: number; code: string } | null => {
-    if (!text) return null;
-    const bracketMatch = text.match(/\(([^)]*)\)/);
-    const source = bracketMatch?.[1] || text;
-    const matches = Array.from(source.matchAll(/([0-9]+(?:[.,][0-9]+)?)/g));
-    if (!matches.length) return null;
-    const raw = matches[matches.length - 1][1];
-    const value = Number(raw.replace(',', '.'));
-    if (!Number.isFinite(value)) return null;
-    const normalized = text.toUpperCase();
-    const hasRub = normalized.includes('RUB') || text.includes('\u20BD');
-    const hasUsd = normalized.includes('USD') || text.includes('$');
-    const hasAmd = normalized.includes('AMD') || text.includes('\u058F');
-    if (hasRub) return { value, code: 'RUB' };
-    if (hasUsd) return { value, code: 'USD' };
-    if (hasAmd) return { value, code: 'AMD' };
-    return null;
-  };
-
-  const isClose = (a: number, b: number, tolerance = 0.06) => {
-    const delta = Math.abs(a - b);
-    const denom = Math.max(Math.abs(b), 1);
-    return delta / denom <= tolerance;
-  };
-
-  const tariffBaseCurrency = useMemo(() => {
-    const lookupCurrency = (code: string) => currencies.find((item) => item.code === code) || null;
-    for (const plan of plans) {
-      const tariffValue = tariffs[plan.device_number]?.tariff_per_month;
-      if (tariffValue == null) continue;
-      const parsed = extractButtonPrice(plan.text);
-      if (!parsed) continue;
-      const buttonCurrency = lookupCurrency(parsed.code);
-      if (!buttonCurrency) continue;
-      if (isClose(Number(tariffValue), parsed.value)) {
-        return buttonCurrency;
-      }
-      const convertedFromRub = convertAmount(Number(tariffValue), rubCurrency, buttonCurrency.code);
-      if (isClose(convertedFromRub, parsed.value)) {
-        return rubCurrency;
-      }
-    }
-    if (baseCurrency) {
-      const resolved = lookupCurrency(baseCurrency.code);
-      if (resolved) return resolved;
-    }
-    return rubCurrency;
-  }, [plans, tariffs, currencies, baseCurrency, convertAmount, rubCurrency]);
 
   const formatTariff = (value: number) => {
     const amount = Number(value) || 0;
-    const sourceCurrency = tariffBaseCurrency || rubCurrency;
-    if (!amount) return formatMoneyFrom(0, sourceCurrency);
-    return formatMoneyFrom(amount, sourceCurrency);
-  };
-
-  const parsePriceValue = (value: unknown): number | null => {
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value;
-    }
-    if (typeof value === 'string') {
-      const cleaned = value.replace(/[^0-9.,-]/g, '').replace(',', '.');
-      if (!cleaned) return null;
-      const parsed = Number(cleaned);
-      return Number.isFinite(parsed) ? parsed : null;
-    }
-    return null;
-  };
-
-  const sanitizeDeviceInput = (value: string) => value.replace(/[^\d]/g, '');
-
-  const normalizeTariffResponse = (data: DeviceTariffResponse | unknown, deviceNumber: number): DeviceTariff | null => {
-    if (Array.isArray(data)) {
-      const match = data.find((item) => {
-        if (!item || typeof item !== 'object') return false;
-        const record = item as Record<string, unknown>;
-        const num = parsePriceValue(record.device_number ?? record.deviceNumber);
-        return num === deviceNumber;
-      });
-      if (match) {
-        return normalizeTariffResponse(match, deviceNumber);
-      }
-    }
-    if (typeof data === 'number') {
-      return {
-        device_number: deviceNumber,
-        tariff_per_day: 0,
-        tariff_per_month: data,
-      };
-    }
-    if (data && typeof data === 'object') {
-      const record = data as Record<string, unknown>;
-      const monthlyRaw =
-        parsePriceValue(record.tariff_per_month) ??
-        parsePriceValue(record.tariff) ??
-        parsePriceValue(record.price) ??
-        parsePriceValue(record.monthly) ??
-        parsePriceValue(record.monthly_price) ??
-        parsePriceValue(record.amount);
-      const dailyRaw = parsePriceValue(record.tariff_per_day);
-      const monthly = monthlyRaw ?? (dailyRaw != null ? dailyRaw * 30 : null);
-      const daily = dailyRaw ?? 0;
-      if (monthly == null) {
-        return null;
-      }
-      return {
-        device_number: Number(record.device_number ?? deviceNumber) || deviceNumber,
-        tariff_per_day: Number.isFinite(daily) ? daily : 0,
-        tariff_per_month: monthly,
-      };
-    }
-    return null;
+    return formatCurrency(amount, { showCode: true, showSymbol: false });
   };
 
   const sortedPlans = useMemo(
     () => [...plans].sort((a, b) => a.device_number - b.device_number),
     [plans]
   );
-  const fallbackPlanNumbers = [2, 3, 5, 10];
+
+  const planPrices = useMemo(() => {
+    const map: Record<number, number> = {};
+    sortedPlans.forEach((plan) => {
+      const parsed = parsePriceFromButtonText(plan.text);
+      if (parsed != null && parsed > 0) {
+        map[plan.device_number] = parsed;
+      }
+    });
+    return map;
+  }, [sortedPlans]);
+
+  const planLabels = useMemo(() => {
+    const map: Record<number, string> = {};
+    sortedPlans.forEach((plan) => {
+      const raw = (plan.text || '').trim();
+      if (!raw) return;
+      const withoutBrackets = raw.replace(/\([^)]*\)/g, ' ');
+      const cleaned = withoutBrackets
+        .replace(/RUB|USD|AMD|₽|\$|֏/gi, ' ')
+        .replace(/\d+(?:[.,]\d+)?/g, ' ')
+        .replace(/[%]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (cleaned) {
+        map[plan.device_number] = cleaned;
+      }
+    });
+    return map;
+  }, [sortedPlans]);
+
   const planNumbers = useMemo(() => {
     if (sortedPlans.length) {
       return sortedPlans.map((plan) => plan.device_number);
     }
-    return fallbackPlanNumbers;
+    return FALLBACK_PLAN_NUMBERS;
   }, [sortedPlans]);
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const params = new URLSearchParams(window.location.search);
-    setDebugEnabled(params.has('debug'));
-    const pendingCode = localStorage.getItem('currency_pending_code');
-    setDebugCurrencyInfo({
-      selected: currency.code,
-      user: user?.currency?.code || null,
-      pending: pendingCode,
-      tariffBase: tariffBaseCurrency?.code || null,
-    });
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    if (!debugEnabled) return;
-    const pendingCode = localStorage.getItem('currency_pending_code');
-    setDebugCurrencyInfo({
-      selected: currency.code,
-      user: user?.currency?.code || null,
-      pending: pendingCode,
-      tariffBase: tariffBaseCurrency?.code || null,
-    });
-  }, [currency.code, user?.currency?.code, debugEnabled, tariffBaseCurrency?.code]);
-
-  useEffect(() => {
     setTariffs({});
-    setRawTariffs({});
-  }, [currencyRefreshId]);
+  }, [currencyRefreshId, user?.currency?.code]);
 
   const deviceLabel = (count: number) => {
     if (language === 'en') return count === 1 ? t('devices.device_single') : t('devices.devices_plural');
@@ -214,18 +215,16 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
       try {
         const data = await fetchDeviceButtons(user.id);
         if (!mounted) return;
-        setRawButtons(data);
         setPlans(Array.isArray(data) ? data : []);
         const selected =
           data.find((item) => item.selected)?.device_number ||
           user.device_number ||
-          fallbackPlanNumbers[0];
+          FALLBACK_PLAN_NUMBERS[0];
         setSelectedDeviceNumber(selected);
       } catch {
         if (mounted) {
-          setRawButtons({ error: 'fetchDeviceButtons_failed' });
           setPlans([]);
-          setSelectedDeviceNumber(user?.device_number || fallbackPlanNumbers[0]);
+          setSelectedDeviceNumber(user?.device_number || FALLBACK_PLAN_NUMBERS[0]);
         }
       }
     };
@@ -233,7 +232,7 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
     return () => {
       mounted = false;
     };
-  }, [user?.id, user?.device_number, currencyRefreshId]);
+  }, [user?.id, user?.device_number, user?.currency?.code, currencyRefreshId]);
 
   useEffect(() => {
     let mounted = true;
@@ -252,11 +251,9 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
       );
       if (!mounted) return;
       const next: Record<number, DeviceTariff> = {};
-      const nextRaw: Record<number, unknown> = {};
       results.forEach((item) => {
         if (item) {
           const [num, data] = item;
-          nextRaw[num] = data;
           const normalized = normalizeTariffResponse(data, num);
           if (normalized) {
             next[num] = normalized;
@@ -264,13 +261,12 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
         }
       });
       setTariffs(next);
-      setRawTariffs(nextRaw);
     };
     loadTariffs();
     return () => {
       mounted = false;
     };
-  }, [planNumbers, user?.id, currencyRefreshId]);
+  }, [planNumbers, user?.id, user?.currency?.code, currencyRefreshId]);
 
   useEffect(() => {
     if (!user?.id || selectedDeviceNumber == null) return;
@@ -279,7 +275,6 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
     fetchDeviceTariff(user.id, selectedDeviceNumber)
       .then((data) => {
         if (mounted) {
-          setRawTariffs((prev) => ({ ...prev, [selectedDeviceNumber]: data }));
           const normalized = normalizeTariffResponse(data, selectedDeviceNumber);
           if (normalized) {
             setTariffs((prev) => ({
@@ -295,7 +290,7 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
     return () => {
       mounted = false;
     };
-  }, [selectedDeviceNumber, user?.id, currencyRefreshId, tariffs]);
+  }, [selectedDeviceNumber, user?.id, user?.currency?.code, currencyRefreshId, tariffs]);
 
   useEffect(() => {
     if (!user?.id || !user?.device_number) return;
@@ -304,7 +299,6 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
     fetchDeviceTariff(user.id, user.device_number)
       .then((data) => {
         if (!mounted) return;
-        setRawTariffs((prev) => ({ ...prev, [user.device_number as number]: data }));
         const normalized = normalizeTariffResponse(data, user.device_number);
         if (normalized) {
           setTariffs((prev) => ({
@@ -317,7 +311,7 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
     return () => {
       mounted = false;
     };
-  }, [user?.id, user?.device_number, currencyRefreshId, tariffs]);
+  }, [user?.id, user?.device_number, user?.currency?.code, currencyRefreshId, tariffs]);
 
   const selectedTariff = useMemo(() => {
     if (selectedDeviceNumber == null) return null;
@@ -325,31 +319,30 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
     return null;
   }, [selectedDeviceNumber, tariffs]);
 
-  const baseTariffPerDevice = useMemo(() => {
-    if (tariffs[2]?.tariff_per_month != null) {
-      return tariffs[2].tariff_per_month;
+  const getDisplayedMonthlyPrice = (deviceNumber: number | null | undefined) => {
+    if (!deviceNumber) return null;
+    const fromButtons = planPrices[deviceNumber];
+    if (typeof fromButtons === 'number' && Number.isFinite(fromButtons)) {
+      return fromButtons;
     }
-    const sortedKeys = Object.keys(tariffs)
-      .map((value) => Number(value))
-      .filter((value) => Number.isFinite(value))
-      .sort((a, b) => a - b);
-    if (!sortedKeys.length) return null;
-    return tariffs[sortedKeys[0]]?.tariff_per_month ?? null;
-  }, [tariffs]);
-
-  const currentUserTariff = useMemo(() => {
-    if (!user?.device_number) return null;
-    return tariffs[user.device_number] || null;
-  }, [tariffs, user?.device_number]);
+    const fromTariff = tariffs[deviceNumber]?.tariff_per_month;
+    if (typeof fromTariff === 'number' && Number.isFinite(fromTariff)) {
+      return fromTariff;
+    }
+    return null;
+  };
 
   const discountValue = useMemo(() => {
     if (!selectedTariff || selectedDeviceNumber == null) return 0;
-    if (!baseTariffPerDevice) return 0;
     if (selectedDeviceNumber < 5) return 0;
-    const baseTotal = baseTariffPerDevice * selectedDeviceNumber;
-    const diff = baseTotal - selectedTariff.tariff_per_month;
-    return diff > 0 ? diff : 0;
-  }, [selectedTariff, selectedDeviceNumber, baseTariffPerDevice]);
+    const monthly = Number(selectedTariff.tariff_per_month) || 0;
+    const daily = Number(selectedTariff.tariff_per_day) || 0;
+    if (daily > 0 && monthly > 0) {
+      const diffByDaily = daily * 30 - monthly;
+      if (diffByDaily > 0) return diffByDaily;
+    }
+    return 0;
+  }, [selectedTariff, selectedDeviceNumber]);
   const discountPercent = discountValue > 0 ? 28 : 0;
   const showSummary = customValue.trim().length > 0;
 
@@ -480,8 +473,8 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
           </span>
           <div className="status-price">
             <div className="price-value">
-              {currentUserTariff && Number.isFinite(Number(currentUserTariff.tariff_per_month))
-                ? formatTariff(currentUserTariff.tariff_per_month, user?.device_number)
+              {getDisplayedMonthlyPrice(user?.device_number) != null
+                ? formatTariff(getDisplayedMonthlyPrice(user?.device_number) as number)
                 : '...'}
             </div>
             <div className="price-period">{t('devices.per_month')}</div>
@@ -490,12 +483,12 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
       </div>
 
       <div className="plans-grid">
-        {(sortedPlans.length ? sortedPlans : fallbackPlanNumbers.map((num) => ({
+        {(sortedPlans.length ? sortedPlans : FALLBACK_PLAN_NUMBERS.map((num) => ({
           device_number: num,
           text: String(num),
           selected: num === selectedDeviceNumber,
         }))).map((plan) => {
-          const price = tariffs[plan.device_number]?.tariff_per_month ?? null;
+          const price = getDisplayedMonthlyPrice(plan.device_number);
           const isActive = selectedDeviceNumber === plan.device_number;
           const isPopular = plan.device_number === 3;
           const showSavings = plan.device_number === 5 || plan.device_number === 10;
@@ -507,9 +500,9 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
             >
               {isPopular && <span className="plan-badge">{t('devices.popular')}</span>}
               <div className="plan-number">{plan.device_number}</div>
-              <div className="plan-name">{deviceLabel(plan.device_number)}</div>
+              <div className="plan-name">{planLabels[plan.device_number] || deviceLabel(plan.device_number)}</div>
               <div className="plan-footer">
-                <span className="plan-price">{price != null ? formatTariff(price, plan.device_number) : '...'}</span>
+                <span className="plan-price">{price != null ? formatTariff(price) : '...'}</span>
                 {showSavings && <span className="plan-savings">{t('devices.savings_28')}</span>}
               </div>
             </div>
@@ -543,8 +536,8 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
         <div className="pricing-row">
           <span className="pricing-label pricing-total-label">{t('devices.total_monthly')}</span>
           <span className="pricing-value pricing-total">
-            {selectedTariff && Number.isFinite(Number(selectedTariff.tariff_per_month))
-              ? formatTariff(selectedTariff.tariff_per_month, selectedDeviceNumber)
+            {getDisplayedMonthlyPrice(selectedDeviceNumber) != null
+              ? formatTariff(getDisplayedMonthlyPrice(selectedDeviceNumber) as number)
               : '...'}
           </span>
         </div>
@@ -564,17 +557,6 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
           <span>{t('devices.info_privacy')}</span> {' \u2022 '} <a href="#" className="info-link">{t('devices.info_how_works')}</a>
         </div>
       </div>
-
-      {debugEnabled && (
-        <div className="devices-debug">
-          <div className="devices-debug-title">Debug: currency</div>
-          <pre>{JSON.stringify(debugCurrencyInfo, null, 2)}</pre>
-          <div className="devices-debug-title">Debug: device buttons</div>
-          <pre>{JSON.stringify(rawButtons, null, 2)}</pre>
-          <div className="devices-debug-title">Debug: device tariffs</div>
-          <pre>{JSON.stringify(rawTariffs, null, 2)}</pre>
-        </div>
-      )}
     </div>
   );
 }
