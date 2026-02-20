@@ -13,7 +13,7 @@ interface DevicesPageProps {
 export default function DevicesPage({ onBack }: DevicesPageProps) {
   const { t, language } = useLanguage();
   const { user, isLoading, error, isAuthenticated, refreshUser } = useUser();
-  const { formatMoneyFrom, currencyRefreshId, currencies } = useCurrency();
+  const { formatMoneyFrom, currencyRefreshId, currencies, currency, convertAmount } = useCurrency();
   const [plans, setPlans] = useState<DeviceButtonOption[]>([]);
   const [selectedDeviceNumber, setSelectedDeviceNumber] = useState<number | null>(null);
   const [tariffs, setTariffs] = useState<Record<number, DeviceTariff>>({});
@@ -21,26 +21,81 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
   const [isUpdating, setIsUpdating] = useState(false);
   const [summaryVisible, setSummaryVisible] = useState(false);
   const [actionsVisible, setActionsVisible] = useState(false);
+  const [debugEnabled, setDebugEnabled] = useState(false);
+  const [rawButtons, setRawButtons] = useState<unknown>(null);
+  const [rawTariffs, setRawTariffs] = useState<Record<number, unknown>>({});
+  const [debugCurrencyInfo, setDebugCurrencyInfo] = useState<Record<string, string | null>>({});
 
   const baseCurrency = user?.currency || null;
-  const tariffCurrency = useMemo(() => {
+  const rubCurrency = useMemo(() => {
     const rub = currencies.find((item) => item.code === 'RUB');
     if (rub) return rub;
     return {
       code: 'RUB',
-      symbol: '₽',
+      symbol: '\u20BD',
       rate: 1,
       rounding_precision: 0,
       id: 1,
       hidden: false,
     } as const;
   }, [currencies]);
+
+  const extractButtonPrice = (text?: string | null): { value: number; code: string } | null => {
+    if (!text) return null;
+    const bracketMatch = text.match(/\(([^)]*)\)/);
+    const source = bracketMatch?.[1] || text;
+    const matches = Array.from(source.matchAll(/([0-9]+(?:[.,][0-9]+)?)/g));
+    if (!matches.length) return null;
+    const raw = matches[matches.length - 1][1];
+    const value = Number(raw.replace(',', '.'));
+    if (!Number.isFinite(value)) return null;
+    const normalized = text.toUpperCase();
+    const hasRub = normalized.includes('RUB') || text.includes('\u20BD');
+    const hasUsd = normalized.includes('USD') || text.includes('$');
+    const hasAmd = normalized.includes('AMD') || text.includes('\u058F');
+    if (hasRub) return { value, code: 'RUB' };
+    if (hasUsd) return { value, code: 'USD' };
+    if (hasAmd) return { value, code: 'AMD' };
+    return null;
+  };
+
+  const isClose = (a: number, b: number, tolerance = 0.06) => {
+    const delta = Math.abs(a - b);
+    const denom = Math.max(Math.abs(b), 1);
+    return delta / denom <= tolerance;
+  };
+
+  const tariffBaseCurrency = useMemo(() => {
+    const lookupCurrency = (code: string) => currencies.find((item) => item.code === code) || null;
+    for (const plan of plans) {
+      const tariffValue = tariffs[plan.device_number]?.tariff_per_month;
+      if (tariffValue == null) continue;
+      const parsed = extractButtonPrice(plan.text);
+      if (!parsed) continue;
+      const buttonCurrency = lookupCurrency(parsed.code);
+      if (!buttonCurrency) continue;
+      if (isClose(Number(tariffValue), parsed.value)) {
+        return buttonCurrency;
+      }
+      const convertedFromRub = convertAmount(Number(tariffValue), rubCurrency, buttonCurrency.code);
+      if (isClose(convertedFromRub, parsed.value)) {
+        return rubCurrency;
+      }
+    }
+    if (baseCurrency) {
+      const resolved = lookupCurrency(baseCurrency.code);
+      if (resolved) return resolved;
+    }
+    return rubCurrency;
+  }, [plans, tariffs, currencies, baseCurrency, convertAmount, rubCurrency]);
+
   const formatTariff = (value: number) => {
     const amount = Number(value) || 0;
-    if (!amount) return formatMoneyFrom(0, tariffCurrency);
-    // Тарифы приходят в RUB без указания валюты — переводим в выбранную валюту.
-    return formatMoneyFrom(amount, tariffCurrency);
+    const sourceCurrency = tariffBaseCurrency || rubCurrency;
+    if (!amount) return formatMoneyFrom(0, sourceCurrency);
+    return formatMoneyFrom(amount, sourceCurrency);
   };
+
   const parsePriceValue = (value: unknown): number | null => {
     if (typeof value === 'number' && Number.isFinite(value)) {
       return value;
@@ -98,6 +153,7 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
     }
     return null;
   };
+
   const sortedPlans = useMemo(
     () => [...plans].sort((a, b) => a.device_number - b.device_number),
     [plans]
@@ -111,7 +167,33 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
   }, [sortedPlans]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    setDebugEnabled(params.has('debug'));
+    const pendingCode = localStorage.getItem('currency_pending_code');
+    setDebugCurrencyInfo({
+      selected: currency.code,
+      user: user?.currency?.code || null,
+      pending: pendingCode,
+      tariffBase: tariffBaseCurrency?.code || null,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!debugEnabled) return;
+    const pendingCode = localStorage.getItem('currency_pending_code');
+    setDebugCurrencyInfo({
+      selected: currency.code,
+      user: user?.currency?.code || null,
+      pending: pendingCode,
+      tariffBase: tariffBaseCurrency?.code || null,
+    });
+  }, [currency.code, user?.currency?.code, debugEnabled, tariffBaseCurrency?.code]);
+
+  useEffect(() => {
     setTariffs({});
+    setRawTariffs({});
   }, [currencyRefreshId]);
 
   const deviceLabel = (count: number) => {
@@ -132,6 +214,7 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
       try {
         const data = await fetchDeviceButtons(user.id);
         if (!mounted) return;
+        setRawButtons(data);
         setPlans(Array.isArray(data) ? data : []);
         const selected =
           data.find((item) => item.selected)?.device_number ||
@@ -140,6 +223,7 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
         setSelectedDeviceNumber(selected);
       } catch {
         if (mounted) {
+          setRawButtons({ error: 'fetchDeviceButtons_failed' });
           setPlans([]);
           setSelectedDeviceNumber(user?.device_number || fallbackPlanNumbers[0]);
         }
@@ -168,9 +252,11 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
       );
       if (!mounted) return;
       const next: Record<number, DeviceTariff> = {};
+      const nextRaw: Record<number, unknown> = {};
       results.forEach((item) => {
         if (item) {
           const [num, data] = item;
+          nextRaw[num] = data;
           const normalized = normalizeTariffResponse(data, num);
           if (normalized) {
             next[num] = normalized;
@@ -178,6 +264,7 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
         }
       });
       setTariffs(next);
+      setRawTariffs(nextRaw);
     };
     loadTariffs();
     return () => {
@@ -192,6 +279,7 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
     fetchDeviceTariff(user.id, selectedDeviceNumber)
       .then((data) => {
         if (mounted) {
+          setRawTariffs((prev) => ({ ...prev, [selectedDeviceNumber]: data }));
           const normalized = normalizeTariffResponse(data, selectedDeviceNumber);
           if (normalized) {
             setTariffs((prev) => ({
@@ -216,6 +304,7 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
     fetchDeviceTariff(user.id, user.device_number)
       .then((data) => {
         if (!mounted) return;
+        setRawTariffs((prev) => ({ ...prev, [user.device_number as number]: data }));
         const normalized = normalizeTariffResponse(data, user.device_number);
         if (normalized) {
           setTariffs((prev) => ({
@@ -236,13 +325,32 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
     return null;
   }, [selectedDeviceNumber, tariffs]);
 
+  const baseTariffPerDevice = useMemo(() => {
+    if (tariffs[2]?.tariff_per_month != null) {
+      return tariffs[2].tariff_per_month;
+    }
+    const sortedKeys = Object.keys(tariffs)
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value))
+      .sort((a, b) => a - b);
+    if (!sortedKeys.length) return null;
+    return tariffs[sortedKeys[0]]?.tariff_per_month ?? null;
+  }, [tariffs]);
+
   const currentUserTariff = useMemo(() => {
     if (!user?.device_number) return null;
     return tariffs[user.device_number] || null;
   }, [tariffs, user?.device_number]);
 
-  const discountPercent = 0;
-  const discountValue = 0;
+  const discountValue = useMemo(() => {
+    if (!selectedTariff || selectedDeviceNumber == null) return 0;
+    if (!baseTariffPerDevice) return 0;
+    if (selectedDeviceNumber < 5) return 0;
+    const baseTotal = baseTariffPerDevice * selectedDeviceNumber;
+    const diff = baseTotal - selectedTariff.tariff_per_month;
+    return diff > 0 ? diff : 0;
+  }, [selectedTariff, selectedDeviceNumber, baseTariffPerDevice]);
+  const discountPercent = discountValue > 0 ? 28 : 0;
   const showSummary = customValue.trim().length > 0;
 
   useEffect(() => {
@@ -453,9 +561,20 @@ export default function DevicesPage({ onBack }: DevicesPageProps) {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
           </svg>
-          <span>{t('devices.info_privacy')}</span> • <a href="#" className="info-link">{t('devices.info_how_works')}</a>
+          <span>{t('devices.info_privacy')}</span> {' \u2022 '} <a href="#" className="info-link">{t('devices.info_how_works')}</a>
         </div>
       </div>
+
+      {debugEnabled && (
+        <div className="devices-debug">
+          <div className="devices-debug-title">Debug: currency</div>
+          <pre>{JSON.stringify(debugCurrencyInfo, null, 2)}</pre>
+          <div className="devices-debug-title">Debug: device buttons</div>
+          <pre>{JSON.stringify(rawButtons, null, 2)}</pre>
+          <div className="devices-debug-title">Debug: device tariffs</div>
+          <pre>{JSON.stringify(rawTariffs, null, 2)}</pre>
+        </div>
+      )}
     </div>
   );
 }

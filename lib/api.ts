@@ -267,13 +267,8 @@ export interface AuthTokens {
   token_type?: string;
 }
 
-const isJwtToken = (token: string): boolean => {
-  return token.split('.').length === 3;
-};
-
 const buildAuthHeaders = (token?: string | null): HeadersInit => {
   if (!token) return {};
-  if (!isJwtToken(token)) return {};
   return { 'Authorization': `Bearer ${token}` };
 };
 
@@ -307,7 +302,11 @@ const fetchJsonWithFallbacks = async <T>(attempts: Array<{ url: string; init: Re
 // Функция для получения user_token из localStorage или cookies
 export const getUserToken = (): string | null => {
   if (typeof window !== 'undefined') {
-    const storedToken = localStorage.getItem('user_token') || localStorage.getItem('auth_token');
+    const storedToken =
+      localStorage.getItem('user_token') ||
+      localStorage.getItem('auth_token') ||
+      localStorage.getItem('auth_access_token') ||
+      localStorage.getItem('access_token');
     if (storedToken) {
       return storedToken;
     }
@@ -341,20 +340,19 @@ export const fetchUserInfo = async (): Promise<UserInfo> => {
     throw new Error('Токен пользователя не найден');
   }
 
-  const attempts: Array<{ url: string; headers?: HeadersInit }> = [];
-  if (isJwtToken(token)) {
-    attempts.push({
+  const attempts: Array<{ url: string; headers?: HeadersInit }> = [
+    {
       url: `${API_PROXY_BASE_URL}/user/info`,
       headers: buildAuthHeaders(token),
-    });
-    attempts.push({
+    },
+    {
       url: `${API_PROXY_BASE_URL}/user/info?token=${encodeURIComponent(token)}`,
       headers: buildAuthHeaders(token),
-    });
-  }
-  attempts.push({
-    url: `${API_PROXY_BASE_URL}/user/info/token?token=${encodeURIComponent(token)}`,
-  });
+    },
+    {
+      url: `${API_PROXY_BASE_URL}/user/info/token?token=${encodeURIComponent(token)}`,
+    },
+  ];
 
   let lastError: Error | null = null;
   let lastStatus: number | null = null;
@@ -776,14 +774,20 @@ export const setUserCurrency = async (
 ): Promise<string> => {
   const token = getUserToken();
   const headers = buildJsonHeaders(token);
+  const extraToken =
+    typeof window !== 'undefined'
+      ? localStorage.getItem('auth_access_token') || localStorage.getItem('access_token')
+      : null;
+  const uniqueTokens = Array.from(new Set([token, extraToken].filter(Boolean))) as string[];
   const resolvedCurrencyId =
     typeof currencyId === 'number' && Number.isFinite(currencyId) ? currencyId : null;
-  const attempts: Array<{ url: string; init: RequestInit }> = [
+  const candidateTokens = uniqueTokens.length ? uniqueTokens : [null];
+  const buildCurrencyAttempts = (headersSet: HeadersInit) => [
     {
       url: `${API_PROXY_BASE_URL}/user/currency`,
       init: {
         method: 'POST',
-        headers,
+        headers: headersSet,
         body: JSON.stringify({ currency_code: currency }),
         credentials: 'include',
       },
@@ -792,7 +796,7 @@ export const setUserCurrency = async (
       url: `${API_PROXY_BASE_URL}/user/currency`,
       init: {
         method: 'POST',
-        headers,
+        headers: headersSet,
         body: JSON.stringify({ currency: currency }),
         credentials: 'include',
       },
@@ -803,7 +807,7 @@ export const setUserCurrency = async (
             url: `${API_PROXY_BASE_URL}/user/currency`,
             init: {
               method: 'POST',
-              headers,
+              headers: headersSet,
               body: JSON.stringify({ currency_id: resolvedCurrencyId }),
               credentials: 'include',
             },
@@ -812,48 +816,8 @@ export const setUserCurrency = async (
             url: `${API_PROXY_BASE_URL}/user/currency`,
             init: {
               method: 'POST',
-              headers,
+              headers: headersSet,
               body: JSON.stringify({ currency: resolvedCurrencyId }),
-              credentials: 'include',
-            },
-          },
-        ]
-      : []),
-    {
-      url: `${API_PROXY_BASE_URL}/user/currency`,
-      init: {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ user_id: userId, currency_code: currency }),
-        credentials: 'include',
-      },
-    },
-    {
-      url: `${API_PROXY_BASE_URL}/user/currency`,
-      init: {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ id: userId, currency_code: currency }),
-        credentials: 'include',
-      },
-    },
-    ...(resolvedCurrencyId !== null
-      ? [
-          {
-            url: `${API_PROXY_BASE_URL}/user/currency`,
-            init: {
-              method: 'POST',
-              headers,
-              body: JSON.stringify({ user_id: userId, currency_id: resolvedCurrencyId }),
-              credentials: 'include',
-            },
-          },
-          {
-            url: `${API_PROXY_BASE_URL}/user/currency`,
-            init: {
-              method: 'POST',
-              headers,
-              body: JSON.stringify({ id: userId, currency_id: resolvedCurrencyId }),
               credentials: 'include',
             },
           },
@@ -861,28 +825,73 @@ export const setUserCurrency = async (
       : []),
   ];
 
-  if (token) {
+  const attempts: Array<{ url: string; init: RequestInit }> = [];
+  candidateTokens.forEach((candidate) => {
+    const headersSet = buildJsonHeaders(candidate);
+    attempts.push(...buildCurrencyAttempts(headersSet));
     attempts.push({
-      url: `${API_PROXY_BASE_URL}/user/currency?token=${encodeURIComponent(token)}`,
+      url: `${API_PROXY_BASE_URL}/user/currency`,
       init: {
         method: 'POST',
-        headers,
+        headers: headersSet,
+        body: JSON.stringify({ user_id: userId, currency_code: currency }),
+        credentials: 'include',
+      },
+    });
+    attempts.push({
+      url: `${API_PROXY_BASE_URL}/user/currency`,
+      init: {
+        method: 'POST',
+        headers: headersSet,
+        body: JSON.stringify({ id: userId, currency_code: currency }),
+        credentials: 'include',
+      },
+    });
+    if (resolvedCurrencyId !== null) {
+      attempts.push({
+        url: `${API_PROXY_BASE_URL}/user/currency`,
+        init: {
+          method: 'POST',
+          headers: headersSet,
+          body: JSON.stringify({ user_id: userId, currency_id: resolvedCurrencyId }),
+          credentials: 'include',
+        },
+      });
+      attempts.push({
+        url: `${API_PROXY_BASE_URL}/user/currency`,
+        init: {
+          method: 'POST',
+          headers: headersSet,
+          body: JSON.stringify({ id: userId, currency_id: resolvedCurrencyId }),
+          credentials: 'include',
+        },
+      });
+    }
+  });
+
+  candidateTokens.forEach((candidate) => {
+    if (!candidate) return;
+    attempts.push({
+      url: `${API_PROXY_BASE_URL}/user/currency?token=${encodeURIComponent(candidate)}`,
+      init: {
+        method: 'POST',
+        headers: buildJsonHeaders(candidate),
         body: JSON.stringify({ currency_code: currency }),
         credentials: 'include',
       },
     });
     if (resolvedCurrencyId !== null) {
       attempts.push({
-        url: `${API_PROXY_BASE_URL}/user/currency?token=${encodeURIComponent(token)}`,
+        url: `${API_PROXY_BASE_URL}/user/currency?token=${encodeURIComponent(candidate)}`,
         init: {
           method: 'POST',
-          headers,
+          headers: buildJsonHeaders(candidate),
           body: JSON.stringify({ currency_id: resolvedCurrencyId }),
           credentials: 'include',
         },
       });
     }
-  }
+  });
 
   return fetchJsonWithFallbacks<string>(attempts);
 };
@@ -1369,20 +1378,19 @@ export const fetchUserInfoByToken = async (token: string): Promise<UserInfo> => 
     throw new Error('Токен пользователя не найден');
   }
 
-  const attempts: Array<{ url: string; headers?: HeadersInit }> = [];
-  if (isJwtToken(token)) {
-    attempts.push({
+  const attempts: Array<{ url: string; headers?: HeadersInit }> = [
+    {
       url: `${API_PROXY_BASE_URL}/user/info`,
       headers: buildAuthHeaders(token),
-    });
-    attempts.push({
+    },
+    {
       url: `${API_PROXY_BASE_URL}/user/info?token=${encodeURIComponent(token)}`,
       headers: buildAuthHeaders(token),
-    });
-  }
-  attempts.push({
-    url: `${API_PROXY_BASE_URL}/user/info/token?token=${encodeURIComponent(token)}`,
-  });
+    },
+    {
+      url: `${API_PROXY_BASE_URL}/user/info/token?token=${encodeURIComponent(token)}`,
+    },
+  ];
 
   let lastError: Error | null = null;
   let lastStatus: number | null = null;
@@ -1463,6 +1471,45 @@ export const verifyAuthToken = async (token: string): Promise<Record<string, unk
   }
 
   return data as Record<string, unknown>;
+};
+
+const decodeUserIdFromJwt = (token: string): number | null => {
+  if (typeof window === 'undefined') return null;
+  const parts = token.split('.');
+  if (parts.length < 2) return null;
+  try {
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(base64.length + (4 - (base64.length % 4)) % 4, '=');
+    const json = decodeURIComponent(
+      atob(padded)
+        .split('')
+        .map((char) => `%${char.charCodeAt(0).toString(16).padStart(2, '0')}`)
+        .join('')
+    );
+    const payload = JSON.parse(json) as { user_id?: number | string; sub?: number | string };
+    const raw = payload.user_id ?? payload.sub;
+    return parseNumericId(raw);
+  } catch {
+    return null;
+  }
+};
+
+export const recoverUserTokenFromAuth = async (): Promise<string | null> => {
+  if (typeof window === 'undefined') return null;
+  const accessToken =
+    localStorage.getItem('auth_access_token') || localStorage.getItem('access_token');
+  if (!accessToken) return null;
+  let userId = decodeUserIdFromJwt(accessToken);
+  if (!userId) {
+    userId = await fetchAuthUserId(accessToken);
+  }
+  if (!userId) return null;
+  const token = await authUserById(userId);
+  if (typeof token === 'string' && token) {
+    setUserToken(token);
+    return token;
+  }
+  return null;
 };
 
 const parseNumericId = (raw: unknown): number | null => {

@@ -1,7 +1,7 @@
 ﻿'use client'
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { UserInfo, fetchUserInfo, getUserToken, removeUserToken, calculateDaysRemaining } from '@/lib/api';
+import { UserInfo, fetchUserInfo, getUserToken, removeUserToken, calculateDaysRemaining, recoverUserTokenFromAuth } from '@/lib/api';
 import { useLanguage } from '@/contexts/LanguageContext';
 
 interface UserContextType {
@@ -89,6 +89,23 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         message.includes('502') ||
         message.includes('503') ||
         message.includes('504');
+      if (isAuthError) {
+        try {
+          const recovered = await recoverUserTokenFromAuth();
+          if (recovered) {
+            const userData = await fetchUserInfo();
+            setUser(userData);
+            setIsAuthenticated(true);
+            setError(null);
+            if (typeof window !== 'undefined' && userData?.id) {
+              localStorage.setItem('user_id', String(userData.id));
+            }
+            return;
+          }
+        } catch {
+          // Если восстановить токен не удалось — падаем дальше и выходим на логин.
+        }
+      }
       if (isAuthError || isServerError) {
         removeUserToken();
         setIsAuthenticated(false);

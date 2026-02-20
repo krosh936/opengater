@@ -1,5 +1,5 @@
 ﻿'use client';
-import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import { Currency, fetchCurrencies, setUserCurrency } from '@/lib/api';
 import { useUser } from '@/contexts/UserContext';
 
@@ -43,12 +43,13 @@ const mergeCurrencies = (data: Currency[]) => {
 };
 
 export const CurrencyProvider = ({ children }: { children: ReactNode }) => {
-  const { user } = useUser();
+  const { user, refreshUser } = useUser();
   const [currencies, setCurrencies] = useState<Currency[]>(DEFAULT_CURRENCIES);
   const [selectedCode, setSelectedCode] = useState<string>('RUB');
   const [isLoading, setIsLoading] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
   const [currencyRefreshId, setCurrencyRefreshId] = useState(0);
+  const pendingSyncRef = useRef<{ code: string; ts: number } | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -95,17 +96,32 @@ export const CurrencyProvider = ({ children }: { children: ReactNode }) => {
         if (pending === user.currency.code) {
           localStorage.removeItem(PENDING_KEY);
           localStorage.removeItem(PENDING_TS_KEY);
+          pendingSyncRef.current = null;
         } else if (Date.now() - pendingTs < PENDING_TTL_MS) {
+          if (user?.id) {
+            const lastAttempt = pendingSyncRef.current;
+            const shouldAttempt =
+              !lastAttempt || lastAttempt.code !== pending || Date.now() - lastAttempt.ts > 3000;
+            if (shouldAttempt) {
+              pendingSyncRef.current = { code: pending, ts: Date.now() };
+              const pendingCurrency = findCurrency(currencies, pending);
+              const pendingCurrencyId = pendingCurrency?.id ?? null;
+              setUserCurrency(user.id, pending, pendingCurrencyId)
+                .then(() => refreshUser({ silent: true }))
+                .catch(() => {});
+            }
+          }
           return;
         } else {
           localStorage.removeItem(PENDING_KEY);
           localStorage.removeItem(PENDING_TS_KEY);
+          pendingSyncRef.current = null;
         }
       }
       localStorage.setItem(STORAGE_KEY, user.currency.code);
     }
     setSelectedCode(user.currency.code);
-  }, [user?.currency?.code]);
+  }, [user?.currency?.code, user?.id, currencies, refreshUser]);
 
   useEffect(() => {
     if (!isHydrated || typeof window === 'undefined') return;
@@ -170,7 +186,7 @@ export const CurrencyProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const setCurrencyCode = async (code: string) => {
-    if (code === selectedCode) return;
+    if (code === selectedCode && user?.currency?.code === code) return;
     const nextCurrency = findCurrency(currencies, code);
     const nextCurrencyId = nextCurrency?.id ?? null;
     if (typeof window !== 'undefined') {
