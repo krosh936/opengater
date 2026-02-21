@@ -1,5 +1,5 @@
 ﻿'use client'
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import './InvitePage.css';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useUser } from '@/contexts/UserContext';
@@ -10,12 +10,24 @@ interface InvitePageProps {
   onBack?: () => void;
 }
 
+type TelegramWebApp = {
+  platform?: string;
+  initDataUnsafe?: Record<string, unknown>;
+  openTelegramLink?: (url: string) => void;
+};
+
+type TelegramWindow = Window & {
+  Telegram?: {
+    WebApp?: TelegramWebApp;
+  };
+};
+
 const detectTelegram = () => {
   if (typeof window === 'undefined') return false;
-  const tg = (window as any).Telegram?.WebApp;
+  const tg = (window as TelegramWindow).Telegram?.WebApp;
   if (!tg) return false;
   try {
-    return tg.platform !== 'unknown' && tg.initDataUnsafe && Object.keys(tg.initDataUnsafe).length > 0;
+    return tg.platform !== 'unknown' && !!tg.initDataUnsafe && Object.keys(tg.initDataUnsafe).length > 0;
   } catch {
     return false;
   }
@@ -24,7 +36,7 @@ const detectTelegram = () => {
 export default function InvitePage({ onBack }: InvitePageProps) {
   const { t } = useLanguage();
   const { user, isLoading, error, isAuthenticated } = useUser();
-  const { currencyRefreshId, formatMoneyFrom } = useCurrency();
+  const { currencyRefreshId, formatCurrency, formatMoneyFrom, convertAmount } = useCurrency();
   const [referredUsers, setReferredUsers] = useState<ReferredUser[]>([]);
   const [isLoadingReferrals, setIsLoadingReferrals] = useState(true);
   const [toast, setToast] = useState<string | null>(null);
@@ -70,14 +82,18 @@ export default function InvitePage({ onBack }: InvitePageProps) {
 
   const referralLink = user?.bot_referral_link || user?.web_referral_link || '';
 
-  const baseCurrency = user?.currency || null;
-  const formatPrice = (price: number) => formatMoneyFrom(price, baseCurrency, { showCode: true, showSymbol: false });
-  const displayPrice = (amount: number) => formatMoneyFrom(amount, baseCurrency, { showCode: true, showSymbol: false });
+  const formatPrice = (price: number) => formatCurrency(price, { showCode: true, showSymbol: false });
+  const displayPrice = (amount: number, fromCurrency?: ReferredUser['currency']) =>
+    formatMoneyFrom(amount, fromCurrency || null, { showCode: true, showSymbol: false });
 
   const invitedCount = referredUsers.length;
   const connectedCount = referredUsers.filter((u) => u.connected === true).length;
-  const totalEarned = referredUsers.reduce((sum, u) => sum + Number(u.amount || 0), 0);
-  const totalEarnedDisplay = displayPrice(totalEarned);
+  const totalEarned = referredUsers.reduce((sum, u) => {
+    const value = Number(u.amount || 0);
+    if (!Number.isFinite(value)) return sum;
+    return sum + convertAmount(value, u.currency || null);
+  }, 0);
+  const totalEarnedDisplay = formatCurrency(totalEarned, { showCode: true, showSymbol: false });
   const progressPercent = invitedCount > 0 ? (connectedCount / invitedCount) * 100 : 0;
 
   const heroSubtitle = t('referral.hero_subtitle', { amount: formatPrice(50) });
@@ -121,11 +137,11 @@ export default function InvitePage({ onBack }: InvitePageProps) {
       return;
     }
 
-    if (isInTelegram && (window as any).Telegram?.WebApp) {
-      const tg = (window as any).Telegram.WebApp;
+    if (isInTelegram && (window as TelegramWindow).Telegram?.WebApp) {
+      const tg = (window as TelegramWindow).Telegram?.WebApp;
       const shareMessage = t('referral.share_message', { bonus: formatPrice(150) });
       const shareUrl = `https://t.me/share/url?url=${encodeURIComponent(referralLink)}&text=${encodeURIComponent(shareMessage)}`;
-      if (tg.openTelegramLink) {
+      if (tg?.openTelegramLink) {
         tg.openTelegramLink(shareUrl);
       } else {
         window.open(shareUrl, '_blank');
@@ -281,7 +297,7 @@ export default function InvitePage({ onBack }: InvitePageProps) {
                         {isActive ? t('referral.status_connected') : t('referral.status_invited')}
                       </div>
                       {isActive && item.amount ? (
-                        <div className="referral-amount">+{displayPrice(Number(item.amount))}</div>
+                        <div className="referral-amount">+{displayPrice(Number(item.amount), item.currency)}</div>
                       ) : null}
                     </div>
                   </div>

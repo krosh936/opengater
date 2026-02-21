@@ -1,8 +1,5 @@
 import { AUTH_PROFILE_ENABLED } from '@/lib/appConfig';
 
-const API_BASE_URL = 'https://api.bot.eutochkin.com/api';
-
-
 const API_PROXY_BASE_URL = '/api/proxy';
 const AUTH_BACKEND_DIRECT_URL = 'https://reauth.cloud/api';
 const AUTH_BACKEND_ALT_URL = 'https://reauth.cloud';
@@ -83,8 +80,13 @@ const cacheGetWithMeta = <T>(key: string, maxAgeMs?: number): { data: T | null; 
 
 const locationsInFlight = new Map<string, Promise<LocationItem[]>>();
 const locationsCooldownUntil = new Map<string, number>();
-const getLocationsCacheKey = (userId: number, language?: string | null) =>
-  `locations:${userId}:${language || 'default'}`;
+const getLocationsCacheKey = (
+  userId: number,
+  language?: string | null,
+  selectedCurrencyCode?: string | null,
+  serverCurrencyCode?: string | null
+) =>
+  `locations:${userId}:${language || 'default'}:${selectedCurrencyCode || 'default'}:${serverCurrencyCode || 'unknown'}`;
 
 const authFetch = async (path: string, init: RequestInit): Promise<Response> => {
   let lastError: Error | null = null;
@@ -249,6 +251,7 @@ export interface ReferredUser {
   username?: string;
   connected?: boolean;
   amount?: number;
+  currency?: Currency | null;
   [key: string]: unknown;
 }
 
@@ -292,7 +295,15 @@ const fetchJsonWithFallbacks = async <T>(attempts: Array<{ url: string; init: Re
         lastError = new Error('Server error: ' + response.status);
         continue;
       }
-      return response.json();
+      const text = await response.text();
+      if (!text) {
+        return null as T;
+      }
+      try {
+        return JSON.parse(text) as T;
+      } catch {
+        return text as T;
+      }
     } catch (error) {
       lastError = error instanceof Error ? error : new Error('Network error');
     }
@@ -634,9 +645,14 @@ export const calculateDaysRemaining = (expireDate: string): string => {
 };
 
 
-export const fetchAvailableLocations = async (userId: number, language?: string): Promise<LocationItem[]> => {
+export const fetchAvailableLocations = async (
+  userId: number,
+  language?: string,
+  currencyCode?: string,
+  serverCurrencyCode?: string
+): Promise<LocationItem[]> => {
   const apiLanguage = language === 'am' ? 'hy' : language;
-  const cacheKey = getLocationsCacheKey(userId, apiLanguage);
+  const cacheKey = getLocationsCacheKey(userId, apiLanguage, currencyCode, serverCurrencyCode);
   const cached = cacheGet<LocationItem[]>(cacheKey, CACHE_TTL.locations);
   if (cached) return cached;
 
@@ -716,10 +732,11 @@ export const fetchAvailableLocations = async (userId: number, language?: string)
   }
 };
 
-export const updateLocations = async (userId: number, locations: number[]): Promise<string> => {
+export const updateLocations = async (_userId: number, locations: number[]): Promise<string> => {
+  void _userId;
   const token = getUserToken();
   const headers = buildJsonHeaders(token);
-  const attempts: Array<{ url: string; init: RequestInit }> = [
+  const result = await fetchJsonWithFallbacks<unknown>([
     {
       url: `${API_PROXY_BASE_URL}/user/locations/`,
       init: {
@@ -729,189 +746,105 @@ export const updateLocations = async (userId: number, locations: number[]): Prom
         credentials: 'include',
       },
     },
-    {
-      url: `${API_PROXY_BASE_URL}/user/locations/`,
-      init: {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ user_id: userId, locations }),
-        credentials: 'include',
-      },
-    },
-    {
-      url: `${API_PROXY_BASE_URL}/user/locations/`,
-      init: {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ id: userId, locations }),
-        credentials: 'include',
-      },
-    },
-    {
-      url: `${API_PROXY_BASE_URL}/user/locations/update`,
-      init: {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ user_id: userId, locations }),
-        credentials: 'include',
-      },
-    },
-  ];
+  ]);
+  return typeof result === 'string' ? result : 'OK';
+};
 
-  if (token) {
-    attempts.push({
-      url: `${API_PROXY_BASE_URL}/user/locations/?token=${encodeURIComponent(token)}`,
+export const fetchLocationsTariff = async (
+  _userId: number,
+  locations: number[]
+): Promise<number> => {
+  void _userId;
+  const token = getUserToken();
+  const params = new URLSearchParams();
+  locations.forEach((id) => {
+    if (Number.isFinite(id)) {
+      params.append('locations', String(id));
+    }
+  });
+
+  const query = params.toString();
+  const data = await fetchJsonWithFallbacks<unknown>([
+    {
+      url: `${API_PROXY_BASE_URL}/user/locations/tariff${query ? `?${query}` : ''}`,
       init: {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ locations }),
+        method: 'GET',
+        headers: buildJsonHeaders(token),
         credentials: 'include',
       },
-    });
+    },
+  ]);
+
+  if (typeof data === 'number' && Number.isFinite(data)) {
+    return data;
   }
 
-  return fetchJsonWithFallbacks<string>(attempts);
+  if (data && typeof data === 'object') {
+    const record = data as Record<string, unknown>;
+    const value =
+      (typeof record.tariff === 'number' && record.tariff) ||
+      (typeof record.total === 'number' && record.total) ||
+      (typeof record.amount === 'number' && record.amount) ||
+      Number(record.tariff ?? record.total ?? record.amount);
+    if (Number.isFinite(value)) {
+      return Number(value);
+    }
+  }
+
+  return 0;
 };
 
 export const setUserCurrency = async (
-  userId: number,
+  _userId: number,
   currency: string,
-  currencyId?: number | null
+  _currencyId?: number | null
 ): Promise<string> => {
+  void _userId;
+  void _currencyId;
   const token = getUserToken();
-  const extraToken =
-    typeof window !== 'undefined'
-      ? localStorage.getItem('auth_access_token') || localStorage.getItem('access_token')
-      : null;
-  const uniqueTokens = Array.from(new Set([token, extraToken].filter(Boolean))) as string[];
-  const resolvedCurrencyId =
-    typeof currencyId === 'number' && Number.isFinite(currencyId) ? currencyId : null;
-  const candidateTokens = uniqueTokens.length ? uniqueTokens : [null];
-  const buildCurrencyAttempts = (headersSet: HeadersInit) => [
+  const result = await fetchJsonWithFallbacks<unknown>([
     {
       url: `${API_PROXY_BASE_URL}/user/currency`,
       init: {
         method: 'POST',
-        headers: headersSet,
+        headers: buildJsonHeaders(token),
         body: JSON.stringify({ currency_code: currency }),
         credentials: 'include',
       },
     },
-    {
-      url: `${API_PROXY_BASE_URL}/user/currency`,
-      init: {
-        method: 'POST',
-        headers: headersSet,
-        body: JSON.stringify({ currency: currency }),
-        credentials: 'include',
-      },
-    },
-    ...(resolvedCurrencyId !== null
-      ? [
-          {
-            url: `${API_PROXY_BASE_URL}/user/currency`,
-            init: {
-              method: 'POST',
-              headers: headersSet,
-              body: JSON.stringify({ currency_id: resolvedCurrencyId }),
-              credentials: 'include',
-            },
-          },
-          {
-            url: `${API_PROXY_BASE_URL}/user/currency`,
-            init: {
-              method: 'POST',
-              headers: headersSet,
-              body: JSON.stringify({ currency: resolvedCurrencyId }),
-              credentials: 'include',
-            },
-          },
-        ]
-      : []),
-  ];
-
-  const attempts: Array<{ url: string; init: RequestInit }> = [];
-  candidateTokens.forEach((candidate) => {
-    const headersSet = buildJsonHeaders(candidate);
-    attempts.push(...buildCurrencyAttempts(headersSet));
-    attempts.push({
-      url: `${API_PROXY_BASE_URL}/user/currency`,
-      init: {
-        method: 'POST',
-        headers: headersSet,
-        body: JSON.stringify({ user_id: userId, currency_code: currency }),
-        credentials: 'include',
-      },
-    });
-    attempts.push({
-      url: `${API_PROXY_BASE_URL}/user/currency`,
-      init: {
-        method: 'POST',
-        headers: headersSet,
-        body: JSON.stringify({ id: userId, currency_code: currency }),
-        credentials: 'include',
-      },
-    });
-    if (resolvedCurrencyId !== null) {
-      attempts.push({
-        url: `${API_PROXY_BASE_URL}/user/currency`,
-        init: {
-          method: 'POST',
-          headers: headersSet,
-          body: JSON.stringify({ user_id: userId, currency_id: resolvedCurrencyId }),
-          credentials: 'include',
-        },
-      });
-      attempts.push({
-        url: `${API_PROXY_BASE_URL}/user/currency`,
-        init: {
-          method: 'POST',
-          headers: headersSet,
-          body: JSON.stringify({ id: userId, currency_id: resolvedCurrencyId }),
-          credentials: 'include',
-        },
-      });
-    }
-  });
-
-  candidateTokens.forEach((candidate) => {
-    if (!candidate) return;
-    attempts.push({
-      url: `${API_PROXY_BASE_URL}/user/currency?token=${encodeURIComponent(candidate)}`,
-      init: {
-        method: 'POST',
-        headers: buildJsonHeaders(candidate),
-        body: JSON.stringify({ currency_code: currency }),
-        credentials: 'include',
-      },
-    });
-    if (resolvedCurrencyId !== null) {
-      attempts.push({
-        url: `${API_PROXY_BASE_URL}/user/currency?token=${encodeURIComponent(candidate)}`,
-        init: {
-          method: 'POST',
-          headers: buildJsonHeaders(candidate),
-          body: JSON.stringify({ currency_id: resolvedCurrencyId }),
-          credentials: 'include',
-        },
-      });
-    }
-  });
-
-  return fetchJsonWithFallbacks<string>(attempts);
+  ]);
+  return typeof result === 'string' ? result : 'OK';
 };
 
 export const setUserLanguage = async (language: string, userId?: number | null): Promise<string> => {
   const token = getUserToken();
   const headers = buildJsonHeaders(token);
-  const apiLanguage = language === 'am' ? 'hy' : language;
+  const normalized = String(language || '').trim();
+  const lowered = normalized.toLowerCase();
+  const languageCode =
+    lowered.includes('ru') || lowered.includes('рус')
+      ? 'ru'
+      : lowered.includes('en') || lowered.includes('eng')
+      ? 'en'
+      : lowered.includes('am') || lowered.includes('arm') || lowered.includes('հայ') || lowered.includes('hy')
+      ? 'am'
+      : normalized || 'en';
+  const languageName =
+    languageCode === 'ru'
+      ? 'Русский'
+      : languageCode === 'en'
+      ? 'English'
+      : languageCode === 'am'
+      ? 'Հայերեն'
+      : normalized || 'English';
+
   const attempts: Array<{ url: string; init: RequestInit }> = [
     {
       url: `${API_PROXY_BASE_URL}/user/language`,
       init: {
         method: 'POST',
         headers,
-        body: JSON.stringify({ language_code: apiLanguage }),
+        body: JSON.stringify({ language: languageName }),
         credentials: 'include',
       },
     },
@@ -920,7 +853,16 @@ export const setUserLanguage = async (language: string, userId?: number | null):
       init: {
         method: 'POST',
         headers,
-        body: JSON.stringify({ language: apiLanguage }),
+        body: JSON.stringify({ language: languageCode }),
+        credentials: 'include',
+      },
+    },
+    {
+      url: `${API_PROXY_BASE_URL}/user/language`,
+      init: {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ language_code: languageCode }),
         credentials: 'include',
       },
     },
@@ -933,7 +875,7 @@ export const setUserLanguage = async (language: string, userId?: number | null):
         init: {
           method: 'POST',
           headers,
-          body: JSON.stringify({ user_id: userId, language_code: apiLanguage }),
+          body: JSON.stringify({ user_id: userId, language: languageName }),
           credentials: 'include',
         },
       },
@@ -942,7 +884,7 @@ export const setUserLanguage = async (language: string, userId?: number | null):
         init: {
           method: 'POST',
           headers,
-          body: JSON.stringify({ id: userId, language_code: apiLanguage }),
+          body: JSON.stringify({ user_id: userId, language_code: languageCode }),
           credentials: 'include',
         },
       }
@@ -955,123 +897,53 @@ export const setUserLanguage = async (language: string, userId?: number | null):
       init: {
         method: 'POST',
         headers,
-        body: JSON.stringify({ language_code: apiLanguage }),
+        body: JSON.stringify({ language: languageName }),
         credentials: 'include',
       },
     });
   }
 
-  return fetchJsonWithFallbacks<string>(attempts);
+  const result = await fetchJsonWithFallbacks<unknown>(attempts);
+  return typeof result === 'string' ? result : 'OK';
 };
 
-export const fetchDeviceButtons = async (userId: number): Promise<DeviceButtonOption[]> => {
+export const fetchDeviceButtons = async (_userId: number): Promise<DeviceButtonOption[]> => {
+  void _userId;
   const token = getUserToken();
-  const headers = buildJsonHeaders(token);
-  const attempts: Array<{ url: string; init: RequestInit }> = [
+  return fetchJsonWithFallbacks<DeviceButtonOption[]>([
     {
       url: `${API_PROXY_BASE_URL}/user/devices/number/buttons`,
-      init: { method: 'GET', headers, credentials: 'include' },
+      init: { method: 'GET', headers: buildJsonHeaders(token), credentials: 'include' },
     },
-    {
-      url: `${API_PROXY_BASE_URL}/user/devices/number/buttons/`,
-      init: { method: 'GET', headers, credentials: 'include' },
-    },
-    {
-      url: `${API_PROXY_BASE_URL}/user/devices/number/buttons?user_id=${encodeURIComponent(userId)}`,
-      init: { method: 'GET', headers, credentials: 'include' },
-    },
-  ];
-
-  if (token) {
-    attempts.push({
-      url: `${API_PROXY_BASE_URL}/user/devices/number/buttons?token=${encodeURIComponent(token)}`,
-      init: { method: 'GET', headers, credentials: 'include' },
-    });
-    attempts.push({
-      url: `${API_PROXY_BASE_URL}/user/devices/number/buttons/?token=${encodeURIComponent(token)}`,
-      init: { method: 'GET', headers, credentials: 'include' },
-    });
-  }
-
-  return fetchJsonWithFallbacks<DeviceButtonOption[]>(attempts);
+  ]);
 };
 
-export const setDeviceNumber = async (userId: number, deviceNumber: number): Promise<number> => {
+export const setDeviceNumber = async (_userId: number, deviceNumber: number): Promise<number> => {
+  void _userId;
   const token = getUserToken();
-  const headers = buildJsonHeaders(token);
-  const attempts: Array<{ url: string; init: RequestInit }> = [
+  return fetchJsonWithFallbacks<number>([
     {
       url: `${API_PROXY_BASE_URL}/user/devices/number/`,
       init: {
         method: 'POST',
-        headers,
+        headers: buildJsonHeaders(token),
         body: JSON.stringify({ device_number: deviceNumber }),
         credentials: 'include',
       },
     },
-    {
-      url: `${API_PROXY_BASE_URL}/user/devices/number/`,
-      init: {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ user_id: userId, device_number: deviceNumber }),
-        credentials: 'include',
-      },
-    },
-    {
-      url: `${API_PROXY_BASE_URL}/user/devices/number/`,
-      init: {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ id: userId, device_number: deviceNumber }),
-        credentials: 'include',
-      },
-    },
-    {
-      url: `${API_PROXY_BASE_URL}/devices/number/set`,
-      init: {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ user_id: userId, device_number: deviceNumber }),
-        credentials: 'include',
-      },
-    },
-  ];
-
-  if (token) {
-    attempts.push({
-      url: `${API_PROXY_BASE_URL}/user/devices/number/?token=${encodeURIComponent(token)}`,
-      init: {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ device_number: deviceNumber }),
-        credentials: 'include',
-      },
-    });
-  }
-
-  return fetchJsonWithFallbacks<number>(attempts);
+  ]);
 };
 
-export const fetchDeviceTariff = async (userId: number, deviceNumber: number): Promise<DeviceTariffResponse> => {
+export const fetchDeviceTariff = async (_userId: number, deviceNumber: number): Promise<DeviceTariffResponse> => {
+  void _userId;
   const token = getUserToken();
-  const headers = buildJsonHeaders(token);
   const query = `device_number=${encodeURIComponent(deviceNumber)}`;
-  const attempts: Array<{ url: string; init: RequestInit }> = [
+  return fetchJsonWithFallbacks<DeviceTariffResponse>([
     {
       url: `${API_PROXY_BASE_URL}/user/devices/number/tariff?${query}`,
-      init: { method: 'GET', headers, credentials: 'include' },
+      init: { method: 'GET', headers: buildJsonHeaders(token), credentials: 'include' },
     },
-  ];
-
-  if (token) {
-    attempts.push({
-      url: `${API_PROXY_BASE_URL}/user/devices/number/tariff?token=${encodeURIComponent(token)}&${query}`,
-      init: { method: 'GET', headers, credentials: 'include' },
-    });
-  }
-
-  return fetchJsonWithFallbacks<DeviceTariffResponse>(attempts);
+  ]);
 };
 
 const parsePaymentNumber = (value: unknown): number | null => {
@@ -1196,20 +1068,70 @@ export const fetchPaymentsHistory = async (userId?: number): Promise<PaymentHist
 };
 
 
+const normalizeReferralCurrency = (value: unknown): Currency | null => {
+  if (!value) return null;
+  if (typeof value === 'string') {
+    const code = value.trim().toUpperCase();
+    if (!code) return null;
+    return {
+      code,
+      symbol: code,
+      rate: 1,
+      rounding_precision: 2,
+      id: 0,
+      hidden: false,
+    };
+  }
+  if (typeof value !== 'object') return null;
+
+  const record = value as Record<string, unknown>;
+  const rawCode =
+    (typeof record.code === 'string' && record.code) ||
+    (typeof record.currency_code === 'string' && record.currency_code) ||
+    (typeof record.name === 'string' && record.name) ||
+    '';
+  const code = rawCode.trim().toUpperCase();
+  if (!code) return null;
+
+  const rawRate = typeof record.rate === 'number' ? record.rate : Number(record.rate);
+  const rawPrecision =
+    typeof record.rounding_precision === 'number'
+      ? record.rounding_precision
+      : Number(record.rounding_precision);
+  const rawId = typeof record.id === 'number' ? record.id : Number(record.id);
+  const symbol = typeof record.symbol === 'string' && record.symbol ? record.symbol : code;
+
+  return {
+    code,
+    symbol,
+    rate: Number.isFinite(rawRate) ? rawRate : 1,
+    rounding_precision: Number.isFinite(rawPrecision) ? rawPrecision : 2,
+    id: Number.isFinite(rawId) ? rawId : 0,
+    hidden: typeof record.hidden === 'boolean' ? record.hidden : false,
+  };
+};
+
 const normalizeReferredUsers = (data: unknown): ReferredUser[] => {
   if (!data) return [];
-  if (Array.isArray(data)) return data as ReferredUser[];
-  if (typeof data !== 'object') return [];
+  if (typeof data !== 'object' && !Array.isArray(data)) return [];
 
-  const record = data as Record<string, unknown>;
-  const list =
-    (Array.isArray(record.items) && record.items) ||
-    (Array.isArray(record.results) && record.results) ||
-    (Array.isArray(record.data) && record.data) ||
-    (Array.isArray(record.referred) && record.referred) ||
-    (Array.isArray(record.users) && record.users) ||
-    (Array.isArray(record.referrals) && record.referrals) ||
-    [];
+  const rootRecord = data && typeof data === 'object' && !Array.isArray(data)
+    ? (data as Record<string, unknown>)
+    : null;
+  const payloadCurrency = rootRecord ? normalizeReferralCurrency(rootRecord.currency) : null;
+  const list = Array.isArray(data)
+    ? data
+    : rootRecord
+      ? (
+          (Array.isArray(rootRecord.items) && rootRecord.items) ||
+          (Array.isArray(rootRecord.results) && rootRecord.results) ||
+          (Array.isArray(rootRecord.data) && rootRecord.data) ||
+          (Array.isArray(rootRecord.referred) && rootRecord.referred) ||
+          (Array.isArray(rootRecord.users) && rootRecord.users) ||
+          (Array.isArray(rootRecord.referrals) && rootRecord.referrals) ||
+          []
+        )
+      : [];
 
   if (!Array.isArray(list)) return [];
 
@@ -1237,7 +1159,14 @@ const normalizeReferredUsers = (data: unknown): ReferredUser[] => {
       false;
     const amountRaw =
       raw.amount ?? raw.bonus ?? raw.reward ?? raw.sum ?? raw.earned ?? raw.bonus_amount;
-    const amount = typeof amountRaw === 'number' ? amountRaw : Number(amountRaw || 0) || undefined;
+    const parsedAmount =
+      typeof amountRaw === 'number' ? amountRaw : parsePaymentNumber(amountRaw) ?? Number(amountRaw || 0);
+    const amount = Number.isFinite(parsedAmount) ? parsedAmount : undefined;
+    const itemCurrency =
+      normalizeReferralCurrency(raw.currency) ||
+      normalizeReferralCurrency(raw.currency_code) ||
+      payloadCurrency ||
+      undefined;
 
     return {
       ...raw,
@@ -1245,6 +1174,7 @@ const normalizeReferredUsers = (data: unknown): ReferredUser[] => {
       username: username || (typeof raw.username === 'string' ? raw.username : undefined),
       connected,
       amount,
+      currency: itemCurrency,
     };
   });
 };
@@ -1262,43 +1192,12 @@ export const fetchReferredUsers = async (): Promise<ReferredUser[]> => {
     ...buildAuthHeaders(token),
   };
 
-  const storedUserId =
-    typeof window !== 'undefined' ? localStorage.getItem('user_id') || undefined : undefined;
-
-  const attempts: Array<{ url: string; init: RequestInit }> = [
+  const data = await fetchJsonWithFallbacks<unknown>([
     {
       url: API_PROXY_BASE_URL + '/user/referred',
       init: { method: 'GET', headers, credentials: 'include' },
     },
-    {
-      url: API_PROXY_BASE_URL + '/user/referred?token=' + encodeURIComponent(token),
-      init: { method: 'GET', headers, credentials: 'include' },
-    },
-  ];
-
-  if (storedUserId) {
-    attempts.push(
-      {
-        url: API_PROXY_BASE_URL + '/user/referred?user_id=' + encodeURIComponent(storedUserId),
-        init: { method: 'GET', headers, credentials: 'include' },
-      },
-      {
-        url: API_PROXY_BASE_URL + '/user/referred?uid=' + encodeURIComponent(storedUserId),
-        init: { method: 'GET', headers, credentials: 'include' },
-      },
-      {
-        url: API_PROXY_BASE_URL + '/user/referred',
-        init: {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ user_id: Number(storedUserId) }),
-          credentials: 'include',
-        },
-      }
-    );
-  }
-
-  const data = await fetchJsonWithFallbacks<unknown>(attempts);
+  ]);
   return normalizeReferredUsers(data);
 };
 

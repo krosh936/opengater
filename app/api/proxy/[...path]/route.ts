@@ -5,6 +5,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const ACTIVE_UPSTREAMS = API_UPSTREAMS;
+const UPSTREAM_COOKIE_KEY = 'opengater_upstream';
 
 // Hop-by-hop заголовки нельзя форвардить через прокси.
 const hopByHopHeaders = new Set([
@@ -34,6 +35,22 @@ const buildUpstreamUrl = (baseUrl: string, req: NextRequest, pathParts: string[]
   return url;
 };
 
+const getPreferredUpstreams = (req: NextRequest): string[] => {
+  if (!ACTIVE_UPSTREAMS.length) return [];
+  const raw = req.cookies.get(UPSTREAM_COOKIE_KEY)?.value;
+  if (!raw) return ACTIVE_UPSTREAMS;
+  let preferred = '';
+  try {
+    preferred = decodeURIComponent(raw);
+  } catch {
+    preferred = raw;
+  }
+  if (!ACTIVE_UPSTREAMS.includes(preferred)) {
+    return ACTIVE_UPSTREAMS;
+  }
+  return [preferred, ...ACTIVE_UPSTREAMS.filter((item) => item !== preferred)];
+};
+
 const fetchWithOptionalSlash = async (url: URL, init: RequestInit) => {
   const response = await fetch(url.toString(), init);
   if (response.ok || response.status !== 404 || url.pathname.endsWith('/')) {
@@ -44,11 +61,37 @@ const fetchWithOptionalSlash = async (url: URL, init: RequestInit) => {
   return fetch(retryUrl.toString(), init);
 };
 
+const buildResponse = async (req: NextRequest, upstreamResponse: Response, baseUrl: string) => {
+  const responseHeaders = new Headers();
+  upstreamResponse.headers.forEach((value, key) => {
+    if (!hopByHopHeaders.has(key.toLowerCase())) {
+      responseHeaders.set(key, value);
+    }
+  });
+
+  const currentCookie = req.cookies.get(UPSTREAM_COOKIE_KEY)?.value || '';
+  const encoded = encodeURIComponent(baseUrl);
+  if (currentCookie !== encoded) {
+    responseHeaders.append(
+      'Set-Cookie',
+      `${UPSTREAM_COOKIE_KEY}=${encoded}; Path=/; Max-Age=86400; SameSite=Lax`
+    );
+  }
+
+  const body = await upstreamResponse.arrayBuffer();
+  return new Response(body, {
+    status: upstreamResponse.status,
+    statusText: upstreamResponse.statusText,
+    headers: responseHeaders,
+  });
+};
+
 const proxyRequest = async (req: NextRequest, pathParts: string[]) => {
   const requestBody = req.method !== 'GET' && req.method !== 'HEAD' ? await req.text() : null;
   let lastError: Error | null = null;
 
-  for (const baseUrl of ACTIVE_UPSTREAMS) {
+  const upstreams = getPreferredUpstreams(req);
+  for (const baseUrl of upstreams) {
     try {
       const url = buildUpstreamUrl(baseUrl, req, pathParts);
       const headers = new Headers();
@@ -99,19 +142,7 @@ const proxyRequest = async (req: NextRequest, pathParts: string[]) => {
         }
       }
 
-      const responseHeaders = new Headers();
-      upstreamResponse.headers.forEach((value, key) => {
-        if (!hopByHopHeaders.has(key.toLowerCase())) {
-          responseHeaders.set(key, value);
-        }
-      });
-
-      const body = await upstreamResponse.arrayBuffer();
-      return new Response(body, {
-        status: upstreamResponse.status,
-        statusText: upstreamResponse.statusText,
-        headers: responseHeaders,
-      });
+      return buildResponse(req, upstreamResponse, baseUrl);
     } catch (error) {
       lastError = error instanceof Error ? error : new Error('Unknown proxy error');
     }

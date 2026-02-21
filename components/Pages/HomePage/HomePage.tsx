@@ -18,7 +18,7 @@ export default function HomePage({ onNavigate }: HomePageProps) {
   const autoplayRef = useRef<NodeJS.Timeout>();
   const prevSlideRef = useRef(0);
   const [locations, setLocations] = useState<LocationItem[]>([]);
-  const { currency, formatCurrency, formatMoneyFrom } = useCurrency();
+  const { currency, currencyRefreshId, formatCurrency, formatMoneyFrom } = useCurrency();
 
   // Используем хук для получения данных пользователя
   const { user, isLoading, error, isAuthenticated } = useUser();
@@ -208,7 +208,12 @@ export default function HomePage({ onNavigate }: HomePageProps) {
     const loadLocations = async () => {
       if (!user?.id) return;
       try {
-        const data = await fetchAvailableLocations(user.id, language);
+        const data = await fetchAvailableLocations(
+          user.id,
+          language,
+          user?.currency?.code || currency.code,
+          user?.currency?.code
+        );
         if (mounted) {
           setLocations(Array.isArray(data) ? data : []);
         }
@@ -222,7 +227,7 @@ export default function HomePage({ onNavigate }: HomePageProps) {
     return () => {
       mounted = false;
     };
-  }, [user?.id, user?.currency?.code, language, languageRefreshId]);
+  }, [user?.id, currency.code, user?.currency?.code, currencyRefreshId, language, languageRefreshId]);
 
   const balanceAmount = user?.balance ?? 0;
   const displayAmount = formatMoneyFrom(balanceAmount, user?.currency || null, { showSymbol: false, showCode: false });

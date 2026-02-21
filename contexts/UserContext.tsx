@@ -23,7 +23,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const { setLanguage } = useLanguage();
+  const { applyLanguageFromServer } = useLanguage();
 
   const loadUser = async (options?: { silent?: boolean }) => {
     const silent = options?.silent === true;
@@ -68,7 +68,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         const isPendingFresh =
           !!pendingLang && !!pendingTs && Date.now() - pendingTs < 60 * 1000;
         if (nextLang && !(isPendingFresh && pendingLang !== nextLang)) {
-          setLanguage(nextLang);
+          applyLanguageFromServer(nextLang);
           if (typeof window !== 'undefined') {
             localStorage.removeItem('user_language_pending');
             localStorage.removeItem('user_language_pending_ts');

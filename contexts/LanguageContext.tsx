@@ -17,6 +17,7 @@ export type LanguageOption = {
 interface LanguageContextType {
   language: Language;
   setLanguage: (lang: Language) => void;
+  applyLanguageFromServer: (lang: Language) => void;
   toggleLanguage: () => void;
   languages: LanguageOption[];
   languageRefreshId: number;
@@ -30,7 +31,6 @@ const LANGUAGE_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 const USER_ID_STORAGE_KEY = 'user_id';
 const LANGUAGE_PENDING_KEY = 'user_language_pending';
 const LANGUAGE_PENDING_TS_KEY = 'user_language_pending_ts';
-const LANGUAGE_PENDING_TTL_MS = 60 * 1000;
 
 const DEFAULT_LANGUAGES: LanguageOption[] = [
   { code: 'ru', label: 'Русский', native: 'Русский', flag: '🇷🇺' },
@@ -121,21 +121,32 @@ export const LanguageProvider = ({
   children: ReactNode;
   initialLanguage?: Language;
 }) => {
-  const [language, setLanguageState] = useState<Language>(initialLanguage || 'ru');
+  const [language, setLanguageState] = useState<Language>(() => {
+    if (initialLanguage) return initialLanguage;
+    if (typeof window === 'undefined') return 'ru';
+    const saved = localStorage.getItem(LANGUAGE_STORAGE_KEY) || '';
+    return normalizeLanguageCode(saved) || 'ru';
+  });
   const [languages, setLanguages] = useState<LanguageOption[]>(DEFAULT_LANGUAGES);
   const [languageRefreshId, setLanguageRefreshId] = useState(0);
 
-  useEffect(() => {
-    // Если язык менялся в localStorage до этого, уже взяли его в useState.
-    // Этот эффект оставляем, чтобы не было рассинхрона при ручном изменении storage.
-    if (typeof window === 'undefined') return;
-    const saved = localStorage.getItem(LANGUAGE_STORAGE_KEY) || '';
-    const normalized = normalizeLanguageCode(saved);
-    if (normalized && normalized !== language) {
-      setLanguageState(normalized);
-      document.cookie = `${LANGUAGE_STORAGE_KEY}=${normalized}; path=/; max-age=${LANGUAGE_COOKIE_MAX_AGE}`;
+  const applyLanguageFromServer = (lang: Language) => {
+    const changed = lang !== language;
+    setLanguageState((prev) => (prev === lang ? prev : lang));
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(LANGUAGE_STORAGE_KEY, lang);
+      document.cookie = `${LANGUAGE_STORAGE_KEY}=${lang}; path=/; max-age=${LANGUAGE_COOKIE_MAX_AGE}`;
+
+      const pending = localStorage.getItem(LANGUAGE_PENDING_KEY);
+      if (pending === lang) {
+        localStorage.removeItem(LANGUAGE_PENDING_KEY);
+        localStorage.removeItem(LANGUAGE_PENDING_TS_KEY);
+      }
     }
-  }, []);
+    if (changed) {
+      setLanguageRefreshId((prev) => prev + 1);
+    }
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -192,7 +203,9 @@ export const LanguageProvider = ({
   }, [language]);
 
   return (
-    <LanguageContext.Provider value={{ language, setLanguage, toggleLanguage, languages, languageRefreshId, t }}>
+    <LanguageContext.Provider
+      value={{ language, setLanguage, applyLanguageFromServer, toggleLanguage, languages, languageRefreshId, t }}
+    >
       {children}
     </LanguageContext.Provider>
   );

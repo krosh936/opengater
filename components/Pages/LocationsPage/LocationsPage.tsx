@@ -4,7 +4,7 @@ import './LocationsPage.css';
 import { useUser } from '@/contexts/UserContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useCurrency } from '@/contexts/CurrencyContext';
-import { fetchAvailableLocations, updateLocations, LocationItem } from '@/lib/api';
+import { fetchAvailableLocations, fetchDeviceTariff, fetchLocationsTariff, updateLocations, LocationItem, DeviceTariffResponse } from '@/lib/api';
 
 interface LocationsPageProps {
   onBack?: () => void;
@@ -12,6 +12,31 @@ interface LocationsPageProps {
 
 type LocationLocale = { name: string; description?: string };
 type LocationLocales = Partial<Record<'ru' | 'en' | 'am', LocationLocale>>;
+
+const parseNumber = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value.replace(',', '.'));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const extractMonthlyTariff = (payload: DeviceTariffResponse | unknown): number | null => {
+  if (typeof payload === 'number' && Number.isFinite(payload)) return payload;
+  if (!payload || typeof payload !== 'object') return null;
+  const record = payload as Record<string, unknown>;
+  const monthly =
+    parseNumber(record.tariff_per_month) ??
+    parseNumber(record.tariff) ??
+    parseNumber(record.price) ??
+    parseNumber(record.monthly) ??
+    parseNumber(record.monthly_price);
+  if (monthly != null) return monthly;
+  const daily = parseNumber(record.tariff_per_day);
+  if (daily != null && daily > 0) return daily * 30;
+  return null;
+};
 
 const LOCATION_LOCALIZED: Record<number, LocationLocales> = {
   2: {
@@ -64,10 +89,12 @@ const LOCATION_LOCALIZED: Record<number, LocationLocales> = {
 export default function LocationsPage({ onBack }: LocationsPageProps) {
   const { user, isLoading, error, isAuthenticated } = useUser();
   const { language, t, languageRefreshId } = useLanguage();
-  const { formatCurrency, currency } = useCurrency();
+  const { formatCurrency, currency, currencies, currencyRefreshId } = useCurrency();
   const [locations, setLocations] = useState<LocationItem[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [isLocationsLoading, setIsLocationsLoading] = useState(true);
+  const [baseMonthlyPrice, setBaseMonthlyPrice] = useState<number | null>(null);
+  const [serverTotalMonthly, setServerTotalMonthly] = useState<number | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -78,7 +105,12 @@ export default function LocationsPage({ onBack }: LocationsPageProps) {
       }
       try {
         setIsLocationsLoading(true);
-        const data = await fetchAvailableLocations(user.id, language);
+        const data = await fetchAvailableLocations(
+          user.id,
+          language,
+          user?.currency?.code || currency.code,
+          user?.currency?.code
+        );
         if (mounted) {
           const filtered = Array.isArray(data) ? data.filter((loc) => !loc.hidden) : [];
           setLocations(filtered);
@@ -95,7 +127,29 @@ export default function LocationsPage({ onBack }: LocationsPageProps) {
     return () => {
       mounted = false;
     };
-  }, [user?.id, language, languageRefreshId]);
+  }, [user?.id, currency.code, user?.currency?.code, currencyRefreshId, language, languageRefreshId]);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadBaseTariff = async () => {
+      if (!user?.id || !user?.device_number) {
+        if (mounted) setBaseMonthlyPrice(null);
+        return;
+      }
+      try {
+        const data = await fetchDeviceTariff(user.id, user.device_number);
+        if (!mounted) return;
+        const monthly = extractMonthlyTariff(data);
+        setBaseMonthlyPrice(monthly);
+      } catch {
+        if (mounted) setBaseMonthlyPrice(null);
+      }
+    };
+    loadBaseTariff();
+    return () => {
+      mounted = false;
+    };
+  }, [user?.id, user?.device_number, currency.code, currencyRefreshId, user?.currency?.code]);
 
   const selectedIds = useMemo(
     () => locations.filter((loc) => loc.selected).map((loc) => loc.id),
@@ -119,19 +173,18 @@ export default function LocationsPage({ onBack }: LocationsPageProps) {
     return t('locations.selected_count', { count });
   }, [selectedIds.length, language, t]);
 
-  const basePriceRub = 50;
-  const currencyCode = currency?.code || user?.currency?.code || 'RUB';
-  const currencyRate = Number(currency?.rate ?? user?.currency?.rate ?? 0);
-
-  const convertFromRub = (valueRub: number) => {
-    const raw = Number(valueRub) || 0;
-    if (!currencyRate || currencyCode === 'RUB') {
-      return raw;
+  const basePrice = useMemo(() => {
+    if (baseMonthlyPrice != null && Number.isFinite(baseMonthlyPrice)) {
+      return baseMonthlyPrice;
     }
-    return raw / currencyRate;
-  };
+    const fallbackDaily = Number(user?.tariff);
+    if (Number.isFinite(fallbackDaily) && fallbackDaily > 0) {
+      return fallbackDaily * 30;
+    }
+    return 0;
+  }, [baseMonthlyPrice, user?.tariff]);
 
-  const locationsCostRub = useMemo(
+  const locationsCost = useMemo(
     () =>
       locations
         .filter((loc) => loc.selected)
@@ -139,9 +192,52 @@ export default function LocationsPage({ onBack }: LocationsPageProps) {
     [locations]
   );
 
-  const totalMonthlyRub = basePriceRub + locationsCostRub;
-  const formatFromRub = (valueRub: number) =>
-    formatCurrency(convertFromRub(valueRub));
+  useEffect(() => {
+    let mounted = true;
+    const loadLocationsTariff = async () => {
+      if (!user?.id) {
+        if (mounted) setServerTotalMonthly(null);
+        return;
+      }
+      if (!selectedIds.length) {
+        if (mounted) setServerTotalMonthly(basePrice);
+        return;
+      }
+      try {
+        const total = await fetchLocationsTariff(user.id, selectedIds);
+        if (mounted) {
+          setServerTotalMonthly(Number.isFinite(total) ? total : null);
+        }
+      } catch {
+        if (mounted) {
+          setServerTotalMonthly(null);
+        }
+      }
+    };
+    loadLocationsTariff();
+    return () => {
+      mounted = false;
+    };
+  }, [user?.id, selectedIds, basePrice, currency.code, currencyRefreshId]);
+
+  const locationsCostFromServer = useMemo(() => {
+    if (serverTotalMonthly == null) return null;
+    return Math.max(0, serverTotalMonthly - basePrice);
+  }, [serverTotalMonthly, basePrice]);
+
+  const effectiveLocationsCost = locationsCostFromServer ?? locationsCost;
+  const totalMonthly = serverTotalMonthly ?? (basePrice + locationsCost);
+  const activeServerCurrencyCode = user?.currency?.code || currency.code;
+  const formatPrice = (value: number) => {
+    const amount = Number(value) || 0;
+    if (activeServerCurrencyCode && activeServerCurrencyCode !== currency.code) {
+      const sourceCurrency = currencies.find((item) => item.code === activeServerCurrencyCode);
+      const precision = sourceCurrency?.rounding_precision ?? 2;
+      const formatted = precision > 0 ? amount.toFixed(precision) : Math.round(amount).toString();
+      return `${formatted} ${activeServerCurrencyCode}`;
+    }
+    return formatCurrency(amount, { showCode: true, showSymbol: false });
+  };
   const showDetails = !isLocationsLoading && locations.length > 0;
 
   const getLocationName = (loc: LocationItem) => {
@@ -304,7 +400,7 @@ export default function LocationsPage({ onBack }: LocationsPageProps) {
                     <line x1="12" y1="1" x2="12" y2="23"></line>
                     <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
                   </svg>
-                  <span className="location-feature-value">+{formatFromRub(loc.price || 0)}</span>
+                  <span className="location-feature-value">+{formatPrice(loc.price || 0)}</span>
                 </div>
                 <div className="location-feature">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -332,7 +428,7 @@ export default function LocationsPage({ onBack }: LocationsPageProps) {
             <div className="pricing-title">{t('locations.pricing_title')}</div>
             <div className="pricing-row">
               <span className="pricing-label">{t('locations.base_tariff')}</span>
-              <span className="pricing-value">{formatFromRub(basePriceRub)}</span>
+              <span className="pricing-value">{formatPrice(basePrice)}</span>
             </div>
             <div className="pricing-row">
               <span className="pricing-label">{t('locations.selected_locations')}</span>
@@ -340,11 +436,11 @@ export default function LocationsPage({ onBack }: LocationsPageProps) {
             </div>
             <div className="pricing-row">
               <span className="pricing-label">{t('locations.locations_cost')}</span>
-              <span className="pricing-value">{formatFromRub(locationsCostRub)}</span>
+              <span className="pricing-value">{formatPrice(effectiveLocationsCost)}</span>
             </div>
             <div className="pricing-row">
               <span className="pricing-label pricing-total-label">{t('locations.total_monthly')}</span>
-              <span className="pricing-value pricing-total">{formatFromRub(totalMonthlyRub)}</span>
+              <span className="pricing-value pricing-total">{formatPrice(totalMonthly)}</span>
             </div>
           </div>
 

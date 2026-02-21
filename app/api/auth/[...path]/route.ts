@@ -3,6 +3,8 @@ import { NextRequest } from 'next/server';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+const AUTH_UPSTREAM_COOKIE_KEY = 'opengater_auth_upstream';
+
 const UPSTREAM_BASE_URLS = [
   'https://reauth.cloud/api',
   'https://reauth.cloud',
@@ -47,6 +49,22 @@ const buildUpstreamUrl = (baseUrl: string, req: NextRequest, pathParts: string[]
   return url;
 };
 
+const getPreferredUpstreams = (req: NextRequest): string[] => {
+  if (!UPSTREAM_BASE_URLS.length) return [];
+  const raw = req.cookies.get(AUTH_UPSTREAM_COOKIE_KEY)?.value;
+  if (!raw) return UPSTREAM_BASE_URLS;
+  let preferred = '';
+  try {
+    preferred = decodeURIComponent(raw);
+  } catch {
+    preferred = raw;
+  }
+  if (!UPSTREAM_BASE_URLS.includes(preferred)) {
+    return UPSTREAM_BASE_URLS;
+  }
+  return [preferred, ...UPSTREAM_BASE_URLS.filter((item) => item !== preferred)];
+};
+
 const proxyRequest = async (req: NextRequest, pathParts: string[]) => {
   const requestBody = req.method !== 'GET' && req.method !== 'HEAD' ? await req.text() : null;
   let lastError: Error | null = null;
@@ -61,6 +79,14 @@ const proxyRequest = async (req: NextRequest, pathParts: string[]) => {
       }
     });
     responseHeaders.set('x-auth-upstream', baseUrl);
+    const currentCookie = req.cookies.get(AUTH_UPSTREAM_COOKIE_KEY)?.value || '';
+    const encoded = encodeURIComponent(baseUrl);
+    if (currentCookie !== encoded) {
+      responseHeaders.append(
+        'Set-Cookie',
+        `${AUTH_UPSTREAM_COOKIE_KEY}=${encoded}; Path=/; Max-Age=86400; SameSite=Lax`
+      );
+    }
 
     const body = await upstreamResponse.arrayBuffer();
 
@@ -71,7 +97,8 @@ const proxyRequest = async (req: NextRequest, pathParts: string[]) => {
     });
   };
 
-  for (const baseUrl of UPSTREAM_BASE_URLS) {
+  const upstreams = getPreferredUpstreams(req);
+  for (const baseUrl of upstreams) {
     try {
       const url = buildUpstreamUrl(baseUrl, req, pathParts);
       const headers = new Headers();
